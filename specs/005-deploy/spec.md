@@ -48,7 +48,7 @@ GitHub Actions fires once daily at **08:30 IST** (03:00 UTC).
 
 ## Requirements
 
-- **FR-001**: `app.py` exposes Flask app on `PORT` (default 8000).
+- **FR-001**: `app.py` exposes Flask app on `PORT` (default 5000).
 - **FR-002**: Auth via `X-Cron-Secret` header or `?secret=` query param.
 - **FR-003**: `/run` response JSON includes job `status`, fetch mode, optional `window_key`.
 - **FR-004**: `.github/workflows/daily-alert.yml` cron `0 3 * * *` + `workflow_dispatch`.

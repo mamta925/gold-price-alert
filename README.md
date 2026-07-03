@@ -84,7 +84,7 @@ pytest tests/unit/ -v -m integration
 python app.py
 ```
 
-Default port **8000**. Endpoints:
+Default port **5000**. Endpoints:
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
@@ -94,8 +94,8 @@ Default port **8000**. Endpoints:
 Smoke test:
 
 ```bash
-curl http://localhost:8000/health
-curl -X POST -H "X-Cron-Secret: YOUR_SECRET" http://localhost:8000/run
+curl http://localhost:5000/health
+curl -X POST -H "X-Cron-Secret: YOUR_SECRET" http://localhost:5000/run
 ```
 
 (`YOUR_SECRET` must match `CRON_SECRET` in `.env`.)

@@ -7,7 +7,7 @@
 ```bash
 pytest tests/unit/test_server.py -v
 pytest tests/unit/ -m "not integration"   # 72 passed
-python app.py                             # local server :8000
+python app.py                             # local server :5000
 ```
 
 ## Endpoints

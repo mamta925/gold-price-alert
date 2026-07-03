@@ -437,7 +437,7 @@ gold-price-alert/
 | `TZ` | No | Default: `Asia/Kolkata` |
 | `LOG_LEVEL` | No | Default: `INFO` |
 | `CRON_SECRET` | **Yes** (SnapDeploy + GHA) | Shared secret for `/run` endpoint; set in SnapDeploy env + GitHub Actions secrets |
-| `PORT` | No | Default: `8000` (SnapDeploy auto-detect) |
+| `PORT` | No | Default: `5000` (SnapDeploy auto-detect) |
 
 ---
 

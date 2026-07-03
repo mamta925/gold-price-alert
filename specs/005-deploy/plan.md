@@ -9,7 +9,7 @@
 ## Stack
 
 - **HTTP**: Flask (minimal WSGI)
-- **Port**: `PORT` env, default 8000
+- **Port**: `PORT` env, default 5000
 - **Auth**: `CRON_SECRET` from env
 
 ## Files

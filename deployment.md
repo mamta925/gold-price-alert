@@ -107,8 +107,8 @@ python app.py
 In another terminal:
 
 ```bash
-curl http://localhost:8000/health
-curl -X POST -H "X-Cron-Secret: YOUR_SECRET" http://localhost:8000/run
+curl http://localhost:5000/health
+curl -X POST -H "X-Cron-Secret: YOUR_SECRET" http://localhost:5000/run
 ```
 
 ---
@@ -136,7 +136,7 @@ First deploy can take **5–10 minutes**. If it stays stuck longer:
    ```bash
    curl https://your-app.snapdeploy.dev/health
    ```
-4. In SnapDeploy container settings, set **`PORT=8000`** if auto-detection picked the wrong port.
+4. In SnapDeploy container settings, set **`PORT=5000`** if auto-detection picked the wrong port.
 
 After fixing, push to GitHub and **redeploy** (or cancel the stuck deploy and start a new one).
 
