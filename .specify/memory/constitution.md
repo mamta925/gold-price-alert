@@ -30,7 +30,7 @@ If `spec.md`, `plan.md`, or code **conflicts with `prd.md`**, the agent **MUST p
 
 ### IV. Scope Discipline
 
-**In v1 (from `prd.md`):** headless cron, GC=F, trailing-low alerts, Email + WhatsApp price alerts, fallback/hard-failure handling.
+**In v1 (from `prd.md`):** headless cron, GC=F, trailing-low breach detection, **daily gold report** (HTML Email + WhatsApp), fallback/hard-failure handling.
 
 The agent **MAY propose** improvements outside `prd.md` but **MUST NOT implement** them without explicit owner approval.
 
@@ -48,11 +48,12 @@ The agent **MAY propose** improvements outside `prd.md` but **MUST NOT implement
 
 | Event | Email | WhatsApp |
 |---|---|---|
-| Price low alert (window trigger) | ✅ Required | ✅ Required |
-| Fallback / degraded data | ✅ Required | ❌ No |
-| Hard failure (`CRITICAL_DATA_FETCH_ERROR`) | ✅ Required | ❌ No |
+| Daily gold report (every successful fetch) | ✅ Required (HTML + plain) | ✅ Required (plain text) |
+| Breach highlight in daily report | ✅ Same message | ✅ Same message |
+| Fallback / degraded data notice | ✅ Required (HTML + plain) | ❌ No |
+| Hard failure (`CRITICAL_DATA_FETCH_ERROR`) | ✅ Required (HTML + plain) | ❌ No |
 
-Message content must follow window-specific templates and trading-day horizons in `prd.md` Section 3.2 & 5.
+Message content must follow daily report and system templates in `prd.md` Section 5. Breach detection horizons remain Section 3.2 trading-day windows.
 
 ### VII. Market Logic Integrity
 
@@ -108,4 +109,4 @@ Message content must follow window-specific templates and trading-day horizons i
 - `prd.md` locked decisions (Section 11) require owner approval to change.
 - Complexity beyond `prd.md` must be justified in `plan.md` before implementation.
 
-**Version**: 1.1.0 | **Ratified**: 2026-07-03 | **Last Amended**: 2026-07-03
+**Version**: 1.2.0 | **Ratified**: 2026-07-03 | **Last Amended**: 2026-07-03 (daily HTML reports)

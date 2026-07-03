@@ -9,6 +9,20 @@ WINDOWS_TOP_DOWN: tuple[WindowDefinition, ...]
 # Order: 1y(252), 6m(126), 3m(63), 1m(21), 15d(15), 10d(10)
 ```
 
+## Public Types
+
+```python
+@dataclass(frozen=True)
+class WindowEvaluation:
+    window_key: str
+    horizon_label: str
+    n: int
+    window_min: float
+    min_date: date
+    is_lowest: bool
+    skipped: bool
+```
+
 ## Public Functions
 
 ### `analyze_lows`
@@ -16,7 +30,7 @@ WINDOWS_TOP_DOWN: tuple[WindowDefinition, ...]
 ```python
 def analyze_lows(closes: list[TradingDayClose]) -> WindowBreach | None:
     """
-    Evaluate trailing-low windows top-down (252 → … → 10).
+    Evaluate trailing-low windows top-down (252 → … → 10) for BREACH detection.
 
     Rules: no → next window; yes → return breach & stop; no on all → None.
     """
@@ -31,11 +45,20 @@ def analyze_lows(closes: list[TradingDayClose]) -> WindowBreach | None:
 - Skips windows where `window.n > len(closes)`
 - On **no**, evaluates the next shorter eligible window (does not stop early)
 - On **yes**, returns immediately — shorter windows are not evaluated
-- On **no for all**, returns `None`
+- On **no for all**, returns `None` (pipeline still sends daily report)
 - At most one breach
 - `breach.current == closes[-1].close`
 
-**Side effects**: INFO log per window evaluated (`[3/5] Window … → no (continue)` or `→ TRIGGER (stop)`)
+**Side effects**: INFO log per window evaluated (no `last5=[...]` payload in log lines)
+
+### `evaluate_windows`
+
+```python
+def evaluate_windows(closes: list[TradingDayClose]) -> list[WindowEvaluation]:
+    """
+    Evaluate ALL six windows for daily report scan table (no short-circuit).
+    """
+```
 
 ---
 
@@ -55,7 +78,8 @@ class WindowBreach:
 
 ## Consumer Contract
 
-`GoldAlertService` and future `templates.py` MAY assume:
+`GoldAlertService`, `main.py`, and `templates.py` MAY assume:
 - `window_key` maps to PRD message keys (`1y`, `6m`, …)
-- `previous_min` excludes today's close
-- Tie at window minimum still produces a breach
+- `previous_min` excludes today's close (breach path only)
+- Tie at window minimum still produces a breach in `analyze_lows()`
+- `evaluate_windows()` is informational — does not replace `analyze_lows()` for breach

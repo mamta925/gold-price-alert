@@ -20,12 +20,12 @@ class GoldAlertService:
 **Preconditions**: `fetch_fn` returns valid `FetchResult` per `001` contract.
 
 **Postconditions**:
-- Hard failure → `analysis.breach is None`, `inr_line is None`, `should_alert is False`
-- No breach → `inr_line is None`, `should_alert is False`
-- Breach + INR available → `should_alert is True`, `inr_line` formatted string
-- Breach + INR unavailable → `should_alert is True`, `inr_line is None`
+- Hard failure → `analysis.breach is None`, `india_quote is None`, `should_alert is False`
+- Successful fetch → `inr_fn` called; `india_quote` set when rate available
+- No breach → `should_alert is False`, `india_quote` may still be set
+- Breach → `should_alert is True`, `india_quote` set when rate available
 
-**Side effects**: INFO/WARNING logs; `inr_fn` called only when breach exists.
+**Side effects**: INFO/WARNING logs; `inr_fn` called on every successful fetch.
 
 ---
 
@@ -51,7 +51,10 @@ class AnalysisResult:
 class RunResult:
     fetch: FetchResult
     analysis: AnalysisResult
-    inr_line: str | None = None
+    india_quote: IndiaGoldQuote | None = None
+
+    @property
+    def inr_line(self) -> str | None: ...
 
     @property
     def should_alert(self) -> bool: ...
@@ -59,9 +62,10 @@ class RunResult:
 
 ---
 
-## Consumer Contract (future notifier / main)
+## Consumer Contract (notifier / main)
 
-- Use `should_alert` to gate price alerts (Email + WhatsApp)
-- Use `fetch.mode == FALLBACK` for degraded-data email (notifier responsibility)
-- Use `fetch.mode == HARD_FAILURE` for critical failure email
-- Pass `RunResult` + breach fields to `templates.py` for message rendering
+- `main.run_daily_job()` sends daily report on every successful fetch — **not** gated by `should_alert`
+- Use `should_alert` / `analysis.breach` for breach highlight copy in templates
+- Use `fetch.mode == FALLBACK` for degraded-data email + daily report addendum
+- Use `fetch.mode == HARD_FAILURE` for critical failure email (no daily report)
+- Pass `RunResult.india_quote` to `render_daily_alert()`

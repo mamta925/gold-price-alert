@@ -27,7 +27,7 @@ When the daily run has usable price history, the engine must determine whether t
 **Acceptance Scenarios**:
 
 1. **Given** ≥252 trading days in full mode, **When** `P_current <= min(last 252 closes)`, **Then** analysis returns breach for **1y** (N=252) and does not evaluate shorter windows.
-2. **Given** today's close is **not** the minimum in any eligible window, **When** analysis runs top-down, **Then** it evaluates **every eligible window** (252 through 10), returns `None`, and exits silently.
+2. **Given** today's close is **not** the minimum in any eligible window, **When** analysis runs top-down, **Then** it evaluates **every eligible window** (252 through 10), returns `None` for breach — **daily report still sent by pipeline** (not silent exit).
 3. **Given** 1y returns **no** but 6m would return **yes**, **When** analysis runs, **Then** it continues past 1y and returns the **6m** breach.
 4. **Given** today's close **ties** the window minimum, **When** analysis runs, **Then** that window **still triggers** (`<=` per PRD).
 
@@ -48,19 +48,32 @@ When fetch returns partial history (10–251 days), analysis must skip windows w
 
 ---
 
-### User Story 3 - Orchestrate fetch, analysis, and INR display line (Priority: P3)
+### User Story 3 - Orchestrate fetch, analysis, and India display quote (Priority: P3)
 
-A service layer must compose fetch → analyze → optional INR/10g parity line for downstream templates/notifier.
+A service layer must compose fetch → analyze → **IndiaGoldQuote** for downstream daily templates/notifier.
 
 **Why this priority**: Separates orchestration from pure window math; enables mocked end-to-end unit tests without network.
 
-**Independent Test**: Mock fetch returning a breach series and mock INR rate → `GoldAlertService.run()` returns `RunResult` with `should_alert=True` and non-null `inr_line`.
+**Independent Test**: Mock fetch returning closes and mock INR rate → `GoldAlertService.run()` returns `RunResult` with `india_quote` set (breach or not).
 
 **Acceptance Scenarios**:
 
-1. **Given** a breach and successful `INR=X`, **When** `GoldAlertService.run()` completes, **Then** `RunResult.inr_line` contains formatted INR/10g text.
-2. **Given** a breach and failed `INR=X`, **When** service runs, **Then** `should_alert` remains **True** and `inr_line` is `None` (USD-only alert path).
-3. **Given** no breach, **When** service runs, **Then** `should_alert` is **False** and INR is not fetched.
+1. **Given** successful fetch and successful `INR=X`, **When** `GoldAlertService.run()` completes, **Then** `RunResult.india_quote` is non-null and `inr_line` property returns formatted summary text.
+2. **Given** successful fetch and failed `INR=X`, **When** service runs, **Then** `india_quote is None` — daily report uses USD only.
+3. **Given** no breach, **When** service runs, **Then** INR is **still fetched** for daily report display.
+4. **Given** hard failure, **When** service runs, **Then** analysis skipped and `india_quote is None`.
+
+---
+
+### User Story 4 - Full window scan for daily report (Priority: P2)
+
+`evaluate_windows()` evaluates **all** six horizons (no short-circuit) for the daily report window scan table.
+
+**Acceptance Scenarios**:
+
+1. **Given** 252 closes, **When** `evaluate_windows()` runs, **Then** returns six `WindowEvaluation` rows with min, date, and `is_lowest` flag.
+2. **Given** fallback with 180 days, **When** evaluated, **Then** ineligible windows have `skipped=True`.
+3. **Given** 1y breach via `analyze_lows()`, **When** `evaluate_windows()` runs, **Then** multiple rows may show `is_lowest=True` (informational only).
 
 ---
 
@@ -80,19 +93,21 @@ A service layer must compose fetch → analyze → optional INR/10g parity line 
 - **FR-001**: Analyzer MUST evaluate windows in order **252 → 126 → 63 → 21 → 15 → 10** (`prd.md` FR-06).
 - **FR-002**: On **yes**, analyzer MUST **short-circuit** — lower windows MUST NOT be evaluated (`prd.md` FR-07).
 - **FR-002a**: On **no**, analyzer MUST continue to the **next shorter** eligible window (`prd.md` FR-06, FR-08).
-- **FR-002b**: On **no for all** eligible windows, analyzer MUST return `None` (silent exit).
+- **FR-002b**: On **no for all** eligible windows, `analyze_lows()` MUST return `None` (no breach). Pipeline still sends daily report.
 - **FR-003**: Trigger condition MUST be `P_current <= min(Window(N))` including ties (`prd.md` §3.2).
-- **FR-004**: Analyzer MUST skip windows where `N > len(closes)` (`prd.md` fallback rules).
+- **FR-004**: Analyzer MUST skip windows where `N > len(closes)` in `analyze_lows()` (`prd.md` fallback rules).
 - **FR-005**: Breach MUST include `current` (`P_current`) and `previous_min` = min of window **excluding today** (`prd.md` FR-11).
 - **FR-006**: Service MUST skip analysis on `FetchMode.HARD_FAILURE` (`prd.md` FR-05a).
-- **FR-007**: Service MUST fetch INR rate only when a breach exists; failure MUST NOT suppress alert (`prd.md` FR-30).
-- **FR-008**: `RunResult.should_alert` MUST be `True` iff not hard failure **and** breach is not `None`.
+- **FR-007**: Service MUST fetch INR rate on **every successful run**; failure MUST NOT suppress daily report (`prd.md` FR-28, FR-30).
+- **FR-008**: `RunResult.should_alert` MUST be `True` iff not hard failure **and** breach is not `None` (gates breach-specific copy, not notification dispatch).
+- **FR-009**: `evaluate_windows()` MUST evaluate all six windows without short-circuit for display in daily report.
 
 ### Key Entities
 
 - **`WindowBreach`**: One triggered horizon — key, label, N, current, previous_min.
+- **`WindowEvaluation`**: Scan row — key, label, N, window_min, min_date, is_lowest, skipped.
 - **`AnalysisResult`**: Wraps optional breach.
-- **`RunResult`**: Fetch + analysis + optional `inr_line`; consumed by templates/notifier (future).
+- **`RunResult`**: Fetch + analysis + optional `india_quote`; `inr_line` property for plain-text summary.
 
 ---
 

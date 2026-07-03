@@ -126,6 +126,20 @@ First scheduled run happens at the next **08:30 IST** after secrets and deploy a
 
 ## Troubleshooting
 
+### Deployment stuck on “Wait for Service Stable” / “WAIT_FOR_HEALTHY”
+
+First deploy can take **5–10 minutes**. If it stays stuck longer:
+
+1. Open SnapDeploy → **Logs** for this container. Look for `ModuleNotFoundError: gunicorn`, crash loops, or port errors.
+2. Ensure **`gunicorn`** is in `requirements.txt` and a **`Procfile`** exists (SnapDeploy runs Gunicorn, not Flask’s dev server).
+3. Confirm **`GET /health`** returns 200 once the URL is live:
+   ```bash
+   curl https://your-app.snapdeploy.dev/health
+   ```
+4. In SnapDeploy container settings, set **`PORT=8000`** if auto-detection picked the wrong port.
+
+After fixing, push to GitHub and **redeploy** (or cancel the stuck deploy and start a new one).
+
 ### Build failed: `No matching distribution found for zoneinfo`
 
 SnapDeploy **Smart Build** may inject stdlib modules (`zoneinfo`, `hmac`) or `pytest` into requirements. Do **not** use Smart Build auto-fix. Redeploy from the repo’s 5-line `requirements.txt` on `master`.

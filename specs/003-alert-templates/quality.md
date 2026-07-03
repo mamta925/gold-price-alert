@@ -2,7 +2,7 @@
 
 **Feature**: `003-alert-templates`  
 **Module**: `src/templates.py`  
-**Last updated**: 2026-07-03
+**Last updated**: 2026-07-03 (rev 2)
 
 ---
 
@@ -10,8 +10,8 @@
 
 | Command | What it does |
 |---|---|
-| `pytest tests/unit/test_templates.py -v` | 15 template tests |
-| `pytest tests/unit/ -v -m "not integration"` | Full suite (51 tests) |
+| `pytest tests/unit/test_templates.py -v` | Daily HTML + system template tests |
+| `pytest tests/unit/ -v -m "not integration"` | Full unit suite (82 tests) |
 
 ---
 
@@ -21,23 +21,26 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from src.models import WindowBreach
-from src.templates import render_price_alert
+from src.analyzer import evaluate_windows
+from src.models import TradingDayClose
+from src.pricing import build_india_gold_quote
+from src.templates import render_daily_alert
 
-breach = WindowBreach(
-    window_key="1y",
-    horizon_label="1 year",
-    n=252,
-    current=1945.20,
-    previous_min=1952.00,
-)
-msg = render_price_alert(
-    breach,
-    inr_line="India parity: ₹1,11,450.00 / 10g (...)",
+closes = [TradingDayClose(date=..., close=4191.50)]  # …252 rows
+latest = closes[-1]
+quote = build_india_gold_quote(latest.close, 86.5)
+
+msg = render_daily_alert(
+    latest=latest,
+    breach=None,
+    window_evaluations=evaluate_windows(closes),
+    india_quote=quote,
+    recent_closes=closes[-5:],
     timestamp=datetime.now(tz=ZoneInfo("Asia/Kolkata")),
 )
-print(msg.subject)
-print(msg.body)
+print(msg.subject)      # 🪙 Gold Daily: $4,191.50, ~₹147,042.72
+print(msg.body)         # plain text / WhatsApp
+print(msg.body_html)    # HTML email
 ```
 
 ---
@@ -46,16 +49,17 @@ print(msg.body)
 
 | Template | Function | PRD |
 |---|---|---|
-| Price alert (6 windows) | `render_price_alert()` | §5.1 |
-| Hard failure | `render_hard_failure_alert()` | §5.3 |
-| Fallback degraded | `render_fallback_alert()` | §5.4 |
-| Fallback addendum | `fallback_trading_days=` kwarg | §5.4 |
+| Daily gold report | `render_daily_alert()` | §5.1 |
+| Breach wrapper | `render_price_alert()` | §5.1 (delegates to daily) |
+| Hard failure | `render_hard_failure_alert()` | §5.4 |
+| Fallback degraded | `render_fallback_alert()` | §5.5 |
+| Fallback addendum | `fallback_trading_days=` kwarg | §5.5 |
 
 ---
 
 ## Expected test count
 
 ```text
-test_templates.py → 15 passed
-Full unit suite   → 51 passed, 1 deselected
+test_templates.py → all daily + system scenarios
+Full unit suite   → 82 passed
 ```

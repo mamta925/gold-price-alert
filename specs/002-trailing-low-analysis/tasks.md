@@ -70,3 +70,12 @@
 - [x] T021 Add `quality.md` testing guide
 
 **Checkpoint**: Analyzer + service ready for feature 003 (templates + notifier)
+
+---
+
+## Phase 6: Rev 2 — Daily report support (2026-07-03)
+
+- [x] T022 [US4] `evaluate_windows()` + `WindowEvaluation` in analyzer
+- [x] T023 [US3] INR fetched on every successful run; `RunResult.india_quote`
+- [x] T024 Update spec pack + PRD for daily HTML reports
+- [x] T025 Full unit suite — 82 passed
