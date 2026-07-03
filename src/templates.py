@@ -17,6 +17,7 @@ from src.email_assets import GOLD_HEADER_IMAGE_SRC
 from src.pricing import IndiaGoldQuote, format_inr, format_usd
 
 IST = ZoneInfo("Asia/Kolkata")
+RECENT_TRADING_DAYS = 5
 
 WINDOW_SKIP_LABELS: dict[str, str] = {
     "1y": "1-Year",
@@ -65,14 +66,34 @@ def _status_detail(breach: WindowBreach | None, current_usd: str) -> str:
     return "Price is above the minimum on every evaluated window."
 
 
-def _daily_subject(latest: TradingDayClose, breach: WindowBreach | None) -> str:
+def _daily_subject(
+    latest: TradingDayClose,
+    breach: WindowBreach | None,
+    india_quote: IndiaGoldQuote | None = None,
+) -> str:
     current_usd = format_usd(latest.close)
     if breach is not None:
         return (
             f"🚨 GOLD ALERT: {current_usd} — "
             f"Lowest in the last {breach.horizon_label}"
         )
+    if india_quote is not None:
+        return (
+            f"🪙 Gold Daily: {current_usd}, ~{format_inr(india_quote.retail_per_10g)}"
+        )
     return f"🪙 Gold Daily: {current_usd} — Not at trailing low"
+
+
+def _format_retail_headline_html(quote: IndiaGoldQuote | None) -> str:
+    if quote is None:
+        return ""
+    return f"""
+              <p style="margin:20px 0 8px;font-size:13px;letter-spacing:1px;text-transform:uppercase;color:#9ca3af;">
+                India retail estimate
+              </p>
+              <p style="margin:0;font-size:46px;line-height:1.1;font-weight:700;color:#fbbf24;">
+                ~ {format_inr(quote.retail_per_10g)}
+              </p>"""
 
 
 def _format_india_quote_html(quote: IndiaGoldQuote | None) -> str:
@@ -95,12 +116,12 @@ def _format_india_quote_html(quote: IndiaGoldQuote | None) -> str:
                   <span style="color:#9ca3af;">({format_inr(quote.parity_per_gram)} / g)</span>
                 </p>
                 <p style="margin:10px 0 0;font-size:15px;color:#e5e7eb;line-height:1.5;">
-                  India retail estimate:
+                  Approximate India retail:
                   <strong style="color:#fbbf24;">{format_inr(quote.retail_per_10g)}</strong> / 10g
                   <span style="color:#9ca3af;">({format_inr(quote.retail_per_gram)} / g)</span>
                 </p>
                 <p style="margin:10px 0 0;font-size:11px;color:#9ca3af;line-height:1.5;">
-                  = parity + {duty_pct}% import duty + {premium_pct}% local premium.
+                  Retail headline above includes +{duty_pct}% import duty + {premium_pct}% local premium.
                   Excludes GST &amp; making charges.
                 </p>
               </div>"""
@@ -112,6 +133,21 @@ def _format_india_quote_text(quote: IndiaGoldQuote | None) -> list[str]:
     from src.pricing import format_india_gold_summary
 
     return ["", format_india_gold_summary(quote)]
+
+
+def _last_five_day_check(
+    latest: TradingDayClose,
+    recent_closes: list[TradingDayClose],
+) -> tuple[str, str, str]:
+    """Return detail, status label, and color for the last-5-days column."""
+    if len(recent_closes) < RECENT_TRADING_DAYS:
+        return "Insufficient data", "—", "#9ca3af"
+
+    min_day = min(recent_closes, key=lambda day: day.close)
+    detail = f"Low {format_usd(min_day.close)} on {min_day.date}"
+    if latest.close <= min_day.close:
+        return detail, "Lowest", "#fbbf24"
+    return detail, "Above low", "#86efac"
 
 
 def _window_rows_html(evaluations: list[WindowEvaluation]) -> str:
@@ -148,12 +184,31 @@ def _window_rows_html(evaluations: list[WindowEvaluation]) -> str:
     return "".join(rows)
 
 
+def _last_five_summary_row_html(
+    latest: TradingDayClose,
+    recent_closes: list[TradingDayClose],
+) -> str:
+    detail, status, status_color = _last_five_day_check(latest, recent_closes)
+    return (
+        "<tr>"
+        f'<td style="padding:10px 12px;border-top:1px solid #3d3d5c;background:#1a1a28;'
+        f'color:#d4af37;font-size:14px;font-weight:700;">Last 5 days</td>'
+        f'<td style="padding:10px 12px;border-top:1px solid #3d3d5c;background:#1a1a28;'
+        f'color:#cbd5e1;font-size:13px;">{detail}</td>'
+        f'<td style="padding:10px 12px;border-top:1px solid #3d3d5c;background:#1a1a28;'
+        f'color:{status_color};font-size:13px;font-weight:700;text-align:right;">'
+        f"{status}</td>"
+        "</tr>"
+    )
+
+
 def _render_daily_html(
     *,
     latest: TradingDayClose,
     breach: WindowBreach | None,
     evaluations: list[WindowEvaluation],
     india_quote: IndiaGoldQuote | None,
+    recent_closes: list[TradingDayClose],
     timestamp: datetime,
     fallback_trading_days: int | None,
 ) -> str:
@@ -217,7 +272,7 @@ def _render_daily_html(
               <p style="margin:0;font-size:46px;line-height:1.1;font-weight:700;color:#fbbf24;">
                 {current_usd}
               </p>
-              {_format_india_quote_html(india_quote)}
+              {_format_retail_headline_html(india_quote)}
               <div style="display:inline-block;margin-top:20px;padding:10px 18px;background:{badge_bg};border:1px solid {badge_border};border-radius:999px;color:#fff7ed;font-size:13px;font-weight:700;letter-spacing:0.5px;">
                 {badge_text}
               </div>
@@ -242,7 +297,9 @@ def _render_daily_html(
                   <th align="right" style="padding:10px 12px;background:#1f1f33;color:#d4af37;font-size:12px;text-transform:uppercase;">Status</th>
                 </tr>
                 {_window_rows_html(evaluations)}
+                {_last_five_summary_row_html(latest, recent_closes)}
               </table>
+              {_format_india_quote_html(india_quote)}
               {fallback_note}
             </td>
           </tr>
@@ -269,6 +326,7 @@ def _render_daily_text(
     breach: WindowBreach | None,
     evaluations: list[WindowEvaluation],
     india_quote: IndiaGoldQuote | None,
+    recent_closes: list[TradingDayClose],
     timestamp: datetime,
     fallback_trading_days: int | None,
 ) -> str:
@@ -277,10 +335,19 @@ def _render_daily_text(
         "",
         f"Date: {latest.date}",
         f"Today's close: {format_usd(latest.close)}",
-        _status_headline(breach),
-        _status_detail(breach, format_usd(latest.close)),
     ]
+    if india_quote is not None:
+        lines.append(
+            f"India retail estimate: ~ {format_inr(india_quote.retail_per_10g)} / 10g"
+        )
+    lines.extend(
+        [
+            _status_headline(breach),
+            _status_detail(breach, format_usd(latest.close)),
+        ]
+    )
     lines.extend(_format_india_quote_text(india_quote))
+    last_five_detail, last_five_status, _ = _last_five_day_check(latest, recent_closes)
     lines.extend(["", "Window scan:"])
     for evaluation in evaluations:
         if evaluation.skipped:
@@ -291,6 +358,9 @@ def _render_daily_text(
             f"  {evaluation.horizon_label}: {format_usd(evaluation.window_min)} "
             f"on {evaluation.min_date} — {status}"
         )
+    lines.append(
+        f"  Last 5 days: {last_five_detail} — {last_five_status.lower()}"
+    )
     lines.extend(["", f"Timestamp: {format_timestamp_ist(timestamp)}"])
     if breach is not None:
         lines.append("Action: Evaluate current entry positions.")
@@ -312,15 +382,17 @@ def render_daily_alert(
     breach: WindowBreach | None,
     window_evaluations: list[WindowEvaluation],
     india_quote: IndiaGoldQuote | None,
+    recent_closes: list[TradingDayClose],
     timestamp: datetime,
     fallback_trading_days: int | None = None,
 ) -> AlertMessage:
-    subject = _daily_subject(latest, breach)
+    subject = _daily_subject(latest, breach, india_quote)
     body = _render_daily_text(
         latest=latest,
         breach=breach,
         evaluations=window_evaluations,
         india_quote=india_quote,
+        recent_closes=recent_closes,
         timestamp=timestamp,
         fallback_trading_days=fallback_trading_days,
     )
@@ -329,6 +401,7 @@ def render_daily_alert(
         breach=breach,
         evaluations=window_evaluations,
         india_quote=india_quote,
+        recent_closes=recent_closes,
         timestamp=timestamp,
         fallback_trading_days=fallback_trading_days,
     )
@@ -355,6 +428,7 @@ def render_price_alert(
         breach=breach,
         window_evaluations=evaluate_windows(window_closes or [latest]),
         india_quote=india_quote,
+        recent_closes=(window_closes or [latest])[-RECENT_TRADING_DAYS:],
         timestamp=timestamp,
         fallback_trading_days=fallback_trading_days,
     )

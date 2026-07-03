@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -50,6 +50,16 @@ def _evaluations_for_breach(breach: WindowBreach) -> list:
     return evaluate_windows(closes)
 
 
+def _recent_closes() -> list[TradingDayClose]:
+    return [
+        TradingDayClose(date=date(2026, 6, 26), close=4078.70),
+        TradingDayClose(date=date(2026, 6, 29), close=4022.30),
+        TradingDayClose(date=date(2026, 6, 30), close=4022.90),
+        TradingDayClose(date=date(2026, 7, 1), close=4068.30),
+        TradingDayClose(date=date(2026, 7, 2), close=4195.80),
+    ]
+
+
 @pytest.mark.parametrize(
     ("window_key", "horizon", "n", "subject_phrase"),
     [
@@ -75,6 +85,7 @@ class TestWindowSpecificSubjects:
             breach=breach,
             window_evaluations=_evaluations_for_breach(breach),
             india_quote=None,
+            recent_closes=_recent_closes(),
             timestamp=FIXED_TS,
         )
         assert msg.subject == (
@@ -90,6 +101,7 @@ class TestDailyAlertBody:
             breach=breach,
             window_evaluations=_evaluations_for_breach(breach),
             india_quote=None,
+            recent_closes=_recent_closes(),
             timestamp=FIXED_TS,
         )
         assert "Gold Daily Report (GC=F)" in msg.body
@@ -105,6 +117,7 @@ class TestDailyAlertBody:
             breach=None,
             window_evaluations=_evaluations_for_breach(_breach("10d", "10 days", 10)),
             india_quote=None,
+            recent_closes=_recent_closes(),
             timestamp=FIXED_TS,
         )
         assert msg.subject == "🪙 Gold Daily: $4,195.80 — Not at trailing low"
@@ -118,6 +131,7 @@ class TestDailyAlertBody:
             breach=_breach("1y", "1 year", 252),
             window_evaluations=_evaluations_for_breach(_breach("1y", "1 year", 252)),
             india_quote=quote,
+            recent_closes=_recent_closes(),
             timestamp=FIXED_TS,
         )
         assert "International parity:" in msg.body
@@ -132,6 +146,7 @@ class TestDailyAlertBody:
             breach=_breach("1y", "1 year", 252),
             window_evaluations=_evaluations_for_breach(_breach("1y", "1 year", 252)),
             india_quote=None,
+            recent_closes=_recent_closes(),
             timestamp=FIXED_TS,
         )
         assert "International parity:" not in msg.body
@@ -143,6 +158,7 @@ class TestDailyAlertBody:
             breach=_breach("6m", "6 months", 126),
             window_evaluations=_evaluations_for_breach(_breach("6m", "6 months", 126)),
             india_quote=None,
+            recent_closes=_recent_closes(),
             timestamp=FIXED_TS,
             fallback_trading_days=180,
         )
@@ -151,17 +167,42 @@ class TestDailyAlertBody:
             "(180 trading days available, not full 252-day / 1-year history)."
         ) in msg.body
 
+    def test_window_scan_includes_last_five_days_column(self) -> None:
+        recent = _recent_closes()
+        closes = [
+            TradingDayClose(date=date(2024, 1, 1) + timedelta(days=i), close=5000.0 - i)
+            for i in range(252)
+        ]
+        closes[-5:] = recent
+        latest = closes[-1]
+        msg = render_daily_alert(
+            latest=latest,
+            breach=None,
+            window_evaluations=evaluate_windows(closes),
+            india_quote=None,
+            recent_closes=recent,
+            timestamp=FIXED_TS,
+        )
+        assert msg.body_html is not None
+        assert "Last 5 days" in msg.body_html
+        assert ">Last 5 Days<" not in msg.body_html
+        assert "Last 5 days: Low $4,022.30 on 2026-06-29 — above low" in msg.body
+        assert "2026-06-26: $4,078.70" not in msg.body
+
     def test_html_includes_gold_coin_and_india_pricing(self) -> None:
         msg = render_daily_alert(
             latest=LATEST,
             breach=None,
             window_evaluations=_evaluations_for_breach(_breach("10d", "10 days", 10)),
             india_quote=build_india_gold_quote(1945.20, 83.0),
+            recent_closes=_recent_closes(),
             timestamp=FIXED_TS,
         )
         assert msg.body_html is not None
         assert GOLD_HEADER_IMAGE_SRC in msg.body_html
-        assert "India 24K Reference" in msg.body_html
+        assert "India retail estimate" in msg.body_html
+        assert "~ ₹" in msg.body_html
+        assert "font-size:46px" in msg.body_html
 
     def test_render_price_alert_wrapper_still_works(self) -> None:
         closes = [
