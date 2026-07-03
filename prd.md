@@ -11,7 +11,7 @@
 | **Project** | Trailing Historical Lows — Automated Gold Alert Engine |
 | **Repository** | `gold-price-alert` |
 | **Status** | Ready for Implementation |
-| **Deployment** | Cloud server, cron-triggered (headless — no UI) |
+| **Deployment** | [SnapDeploy](https://snapdeploy.dev) — container hosting from GitHub (free tier) |
 | **Primary Language** | Python 3.x |
 | **Last Updated** | 2026-07-03 |
 | **Schedule** | **Morning IST** — recommended cron: `30 8 * * *` (08:30 IST daily) |
@@ -36,6 +36,7 @@ Track the daily closing price of Gold and automatically notify the user when **t
 - **Failure email** on hard fetch failure (`CRITICAL_DATA_FETCH_ERROR`)
 - **Fallback mode:** if API returns 10–251 trading days, analyze available recent days and **Email** a degraded-data warning
 - Cron-compatible single-run script (run once, exit)
+- **SnapDeploy** deployment: GitHub-connected container, auto-sleep/wake, daily scheduled trigger
 
 ### Out of Scope
 
@@ -60,6 +61,19 @@ Track the daily closing price of Gold and automatically notify the user when **t
 | **FR-04** | Windows are built from **trading days only** (rows with valid close prices). Weekends and exchange holidays are excluded implicitly — each row is one session close. |
 | **FR-05** | **Primary target:** receive **≥252 trading days** (full mode). If the API returns **10–251 trading days** after retries → **fallback mode** (Section 3.1.1): use available recent days, skip windows that exceed available history, and send an **Email** degraded-data alert. |
 | **FR-05a** | If the API returns **zero data** or **fewer than 10** trading days after retries → **hard failure**: log `CRITICAL_DATA_FETCH_ERROR`, send **Email** alert (Section 5.3), exit without low-detection. |
+
+### 3.1.2 Deployment & Scheduling (SnapDeploy)
+
+| ID | Requirement |
+|---|---|
+| **FR-19** | **Host on SnapDeploy** (free tier): connect this GitHub repo; SnapDeploy auto-builds the Python container (no manual Dockerfile required unless needed). |
+| **FR-20** | Container spec: **512 MB RAM / 0.25 vCPU** is sufficient; script runs once daily (~seconds of CPU). |
+| **FR-21** | **Auto-sleep / auto-wake:** container sleeps when idle; wakes on incoming HTTP (~60s cold start acceptable before 08:30 IST run). |
+| **FR-22** | Expose a **protected HTTP trigger** (e.g. `POST /run` with `CRON_SECRET` header or query param) that invokes the alert pipeline once and returns JSON status. No public UI beyond health + run endpoints. |
+| **FR-23** | **Daily schedule at 08:30 IST** via **GitHub Actions** cron workflow (SnapDeploy has no built-in cron): workflow sends one authenticated HTTP request to the SnapDeploy app URL → wakes container → runs job → container sleeps again. |
+| **FR-24** | **Free-tier budget:** 1 wake/run per day (well within SnapDeploy's **10 deploys/wake-ups per day** limit). |
+| **FR-25** | Store all secrets (SMTP, Twilio, `CRON_SECRET`) in **SnapDeploy environment variables** dashboard — not in git. |
+| **FR-26** | Optional: `GET /health` for SnapDeploy health checks and manual smoke tests. |
 
 #### 3.1.1 Fallback Mode (Partial / Degraded Data)
 
@@ -242,24 +256,23 @@ Low-detection will proceed top-down for eligible windows (first match wins). A s
 ## 6. System Architecture
 
 ```
-[Yahoo Finance / yfinance]
+[GitHub Actions — 08:30 IST cron]
          │
-         │  period="1y" → ~252 trading-day closes (GC=F), 3 retries
+         │  POST /run (CRON_SECRET) → SnapDeploy URL
          ▼
-[Python Cron Script — 08:30 IST]
+[SnapDeploy Container — auto-wake → run → auto-sleep]
          │
-         ├── <10 days or empty ──► CRITICAL_DATA_FETCH_ERROR
-         │                          └── Email (hard failure template) → exit
+         │  Fetch GC=F (yfinance, 3 retries)
+         ▼
+         ├── <10 days or empty ──► CRITICAL_DATA_FETCH_ERROR → Email → exit
          │
-         ├── 10–251 days ──► FALLBACK MODE
-         │                    ├── Email (degraded-data template)
-         │                    └── Top-down short-circuit on eligible windows only
+         ├── 10–251 days ──► FALLBACK MODE → Email degraded alert
+         │                    └── Top-down short-circuit (eligible windows)
          │
          └── ≥252 days ──► FULL MODE
                               └── Top-down short-circuit:
-                                  252 (1Y) → if trigger → alert & STOP
-                                  else 126 (6M) → if trigger → alert & STOP
-                                  else 63 (3M) → … → 10
+                                  252 → trigger? → alert & STOP
+                                  else 126 → … → 10
                                        │
                                        ▼
                                  [Any trigger?]
@@ -269,9 +282,7 @@ Low-detection will proceed top-down for eligible windows (first match wins). A s
                                  ▼              ▼
                           [One window-specific  [Log & exit
                            Email + WhatsApp      quietly]
-                           for matched horizon
-                           (+ fallback note
-                            if degraded)]
+                           for matched horizon]
 ```
 
 ### Tech Stack
@@ -283,8 +294,9 @@ Low-detection will proceed top-down for eligible windows (first match wins). A s
 | Data processing | `pandas` |
 | Email | `smtplib` + Gmail SMTP (`smtp.gmail.com:465`, SSL) |
 | WhatsApp | Twilio WhatsApp API (**required v1**) |
-| Scheduling | Cron with `TZ=Asia/Kolkata`, morning IST |
-| Config | `python-dotenv` + environment variables |
+| Scheduling | GitHub Actions cron → HTTP wake of SnapDeploy container (08:30 IST) |
+| Hosting | [SnapDeploy](https://snapdeploy.dev) free tier — GitHub deploy, auto-sleep/wake, no credit card |
+| Config | SnapDeploy env vars + `python-dotenv` for local dev |
 
 ---
 
@@ -297,6 +309,10 @@ gold-price-alert/
 ├── requirements.txt
 ├── README.md
 ├── prd.md
+├── app.py                # SnapDeploy entry: /health + protected /run → main.py
+├── .github/
+│   └── workflows/
+│       └── daily-alert.yml   # 08:30 IST cron → POST SnapDeploy /run
 ├── src/
 │   ├── __init__.py
 │   ├── main.py           # Entry: fetch → evaluate (top-down) → notify → log
@@ -328,6 +344,8 @@ gold-price-alert/
 | `TWILIO_WHATSAPP_TO` | **Yes** | User WhatsApp number |
 | `TZ` | No | Default: `Asia/Kolkata` |
 | `LOG_LEVEL` | No | Default: `INFO` |
+| `CRON_SECRET` | **Yes** (SnapDeploy + GHA) | Shared secret for `/run` endpoint; set in SnapDeploy env + GitHub Actions secrets |
+| `PORT` | No | Default: `8000` (SnapDeploy auto-detect) |
 
 ---
 
@@ -344,7 +362,8 @@ gold-price-alert/
 - [ ] **AC-08:** Hard failure (<10 days or empty after retries) → log `CRITICAL_DATA_FETCH_ERROR` + **Email** hard-failure alert; no low-detection.
 - [ ] **AC-09:** Partial data (10–251 trading days) → **Email** fallback alert + low-detection on eligible windows only (skip windows where N > available days).
 - [ ] **AC-09a:** Fallback price alerts include degraded-data note; still sent via Email + WhatsApp if windows trigger.
-- [ ] **AC-10:** Cron documented for **morning IST** (`30 8 * * *`, `TZ=Asia/Kolkata`).
+- [ ] **AC-10:** GitHub Actions workflow fires **daily at 08:30 IST** and hits SnapDeploy `/run` with `CRON_SECRET`.
+- [ ] **AC-10a:** SnapDeploy container deploys from GitHub; env vars configured in dashboard; free-tier usage ≤1 wake/day.
 - [ ] **AC-11:** No secrets in git; `.env.example` lists all required vars.
 - [ ] **AC-12:** Unit tests cover short-circuit (1-Year blocks lower checks), single-window templates, no-trigger path, and failure path.
 
@@ -359,8 +378,9 @@ gold-price-alert/
 5. **Notifier** — `notifier.py` Email + WhatsApp for price and failure alerts
 6. **Main** — `main.py` orchestration, IST timestamps, logging
 7. **Tests** — analyzer ordering + template rendering
-8. **Docs** — README with morning IST cron example
-9. **Dry run** — manual execution; verify silent exit and failure notification paths
+8. **Docs** — README with SnapDeploy setup + GitHub Actions schedule
+9. **Deploy** — `app.py` HTTP trigger, SnapDeploy connect, GHA workflow secrets
+10. **Dry run** — manual `curl /run` against SnapDeploy URL; verify silent exit and failure paths
 
 ---
 
@@ -378,6 +398,7 @@ gold-price-alert/
 | **D8** | On **partial data** (10–251 trading days) → **fallback to available recent days**, **Email** degraded alert, run eligible windows only (skip longer horizons). |
 | **D9** | Price alerts (when windows trigger) → still **Email + WhatsApp**; include fallback note if degraded data was used. |
 | **D10** | **Option A adopted:** window N values use **standard market trading days** (~252/year), not calendar days. Fetch `period="1y"` — do not require 365 rows. |
+| **D11** | **SnapDeploy** is the v1 hosting platform: GitHub-connected container, free tier, auto-sleep/wake. Daily **08:30 IST** trigger via **GitHub Actions** → HTTP `/run`. No VPS/cron server management. |
 
 ---
 
@@ -390,7 +411,8 @@ gold-price-alert/
 | **Trigger / breach** | `P_current <= min(Window(N))` — today is at or below the window low |
 | **Top-down short-circuit** | Check longest window first (252-day / 1-year); on first trigger, alert and stop |
 | **Previous min** | Minimum close in the window **excluding** today |
-| **Headless** | No UI; cron-invoked CLI script only |
+| **Headless** | No UI; daily job triggered via protected HTTP endpoint (not interactive) |
+| **SnapDeploy** | Container host — GitHub deploy, auto-sleep when idle, wakes on HTTP traffic |
 | **Fallback mode** | Partial API data (10–251 days): analyze recent days, skip ineligible windows, Email warning |
 | **Hard failure** | Empty or <10 days after retries: no analysis, Email critical alert |
 | **Full mode** | ≥252 trading days received — all six windows eligible |
