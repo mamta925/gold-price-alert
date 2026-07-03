@@ -1,0 +1,33 @@
+---
+description: Enforce Spec Kit workflow before any feature work
+alwaysApply: true
+---
+
+# Spec-Driven Development (Mandatory)
+
+Before writing or changing **feature code**, follow the Spec Kit workflow defined in `.specify/memory/constitution.md`:
+
+**Constitution → Specify → Plan → Tasks → Implement**
+
+## Required gates
+
+1. Read `prd.md` and the constitution. Locked decisions (§11) require owner approval to change.
+2. Create or update artifacts under `specs/NNN-feature-name/`:
+   - `spec.md` — user stories, FR traceability to `prd.md`
+   - `plan.md` — technical approach + constitution check
+   - `data-model.md` — entities and invariants
+   - `contracts/` — public module APIs
+   - `tasks.md` — ordered, testable tasks (TDD: tests before impl)
+3. **Do not implement** until `spec.md`, `plan.md`, and `tasks.md` exist for that feature.
+4. On conflict with `prd.md`, **stop and ask** — do not silently override.
+
+## Implementation rules
+
+- **TDD**: failing tests first for core logic (fetcher, analyzer, service, templates, notifier).
+- **Minimal diff**: smallest correct change; no drive-by refactors.
+- Mark tasks complete in `tasks.md` only when tests pass.
+- Never git-commit unless the owner explicitly asks.
+
+## Retroactive specs
+
+If code was written without specs, **backfill** the spec pack before continuing that feature or adding dependents (e.g. notifier on top of service).

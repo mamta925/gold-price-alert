@@ -34,3 +34,31 @@ class FetchResult:
     error_code: str | None = None
     degraded_code: str | None = None
     expected_trading_days: int = EXPECTED_TRADING_DAYS
+
+
+@dataclass(frozen=True)
+class WindowBreach:
+    window_key: str
+    horizon_label: str
+    n: int
+    current: float
+    previous_min: float
+
+
+@dataclass(frozen=True)
+class AnalysisResult:
+    breach: WindowBreach | None
+
+
+@dataclass(frozen=True)
+class RunResult:
+    fetch: FetchResult
+    analysis: AnalysisResult
+    inr_line: str | None = None
+
+    @property
+    def should_alert(self) -> bool:
+        return (
+            self.fetch.mode is not FetchMode.HARD_FAILURE
+            and self.analysis.breach is not None
+        )

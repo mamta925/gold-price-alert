@@ -13,10 +13,20 @@ Automated **trailing historical low** alerts for Gold Futures (`GC=F`) — headl
 ### Setup checklist
 
 1. Push code to GitHub.
-2. [SnapDeploy](https://snapdeploy.dev) → **New Container** → connect this repo.
-3. Set env vars in SnapDeploy dashboard (SMTP, Twilio, `CRON_SECRET`, etc.) — see `prd.md` Section 8.
-4. Add GitHub Actions secrets: `SNAPDEPLOY_APP_URL`, `CRON_SECRET`.
-5. Enable `.github/workflows/daily-alert.yml` (created during `/speckit-implement`).
+2. [SnapDeploy](https://snapdeploy.dev) → **New Container** → connect this repo (entry: `app.py`).
+3. Set env vars in SnapDeploy dashboard — see `.env.example` and `prd.md` Section 8.
+4. Add GitHub repository secrets: `SNAPDEPLOY_APP_URL` (e.g. `https://your-app.snapdeploy.dev`), `CRON_SECRET` (same value as SnapDeploy).
+5. Enable workflow: `.github/workflows/daily-alert.yml` (runs daily **08:30 IST**).
+
+### Local HTTP smoke test
+
+```bash
+export CRON_SECRET=local-dev-secret
+# plus SMTP/Twilio vars from .env.example
+python app.py
+curl http://localhost:8000/health
+curl -X POST -H "X-Cron-Secret: local-dev-secret" http://localhost:8000/run
+```
 
 **Free tier usage:** 1 wake/run per day ≪ 10 daily limit. No credit card required.
 

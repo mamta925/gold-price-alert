@@ -37,12 +37,16 @@ Track the daily closing price of Gold and automatically notify the user when **t
 - **Fallback mode:** if API returns 10–251 trading days, analyze available recent days and **Email** a degraded-data warning
 - Cron-compatible single-run script (run once, exit)
 - **SnapDeploy** deployment: GitHub-connected container, auto-sleep/wake, daily scheduled trigger
+- **India display pricing:** USD `GC=F` for detection; **INR per 10g parity** in alert text via `GC=F` + `INR=X` (no MCX ticker, no paid APIs)
 
 ### Out of Scope
 
 - Web UI, dashboard, or mobile app
 - Real-time intraday alerts (daily close only)
 - Multi-asset support (Gold only for v1)
+- MCX Gold futures ticker or Indian exchange-native low detection
+- GoldAPI.io, MetalpriceAPI, or other API-key precious-metal services
+- Exact retail jeweler billing (import duty, GST, making charges)
 - Historical alert storage / database
 - Alert deduplication across consecutive days
 - Backtesting UI
@@ -55,7 +59,7 @@ Track the daily closing price of Gold and automatically notify the user when **t
 
 | ID | Requirement |
 |---|---|
-| **FR-01** | Track **Gold Futures** ticker `GC=F` on Yahoo Finance as the sole pricing source. |
+| **FR-01** | Track **Gold Futures** ticker `GC=F` on Yahoo Finance as the **sole pricing source for low-detection** (trailing windows, triggers). |
 | **FR-02** | Fetch **~1 calendar year** of daily closes using `period="1y"` (yfinance returns **~252 trading rows** for GC=F). This matches the 1-Year window (N=252). Do **not** require 365 rows — markets have ~252 trading days per calendar year. |
 | **FR-03** | Execute **once per day in the morning (IST)** — **08:30 IST** (`30 8 * * *` with `TZ=Asia/Kolkata`). GC=F settles ~02:30–03:30 IST; 08:30 IST ensures data is available. |
 | **FR-04** | Windows are built from **trading days only** (rows with valid close prices). Weekends and exchange holidays are excluded implicitly — each row is one session close. |
@@ -138,6 +142,19 @@ In plain language: **if today's close is the lowest (or tied for lowest) in the 
 | **FR-17** | On **hard fetch failure** (`CRITICAL_DATA_FETCH_ERROR`), send a dedicated **Email** failure notification (Section 5.3). |
 | **FR-18** | On **fallback mode** (partial data), send a dedicated **Email** degraded-data notification (Section 5.4) before running eligible windows. |
 
+### 3.4 India Display Pricing (Alert Text Only)
+
+> **Detection vs display:** Trailing-low logic runs **100% on `GC=F` USD closes**. India INR lines are **informational only** — they do **not** affect triggers, windows, or short-circuit order.
+
+| ID | Requirement |
+|---|---|
+| **FR-27** | Use **`src/pricing.py`** to convert USD gold to **INR per 10 grams** for alert messages when `INR=X` is available. |
+| **FR-28** | Fetch **`INR=X`** (USD/INR) via yfinance — **no API keys**; used only at notification time, not for window math. |
+| **FR-29** | Conversion formula: `(gold_usd_per_troy_oz / 31.1035) × 10 × usd_inr_rate` — international **24K parity**, not retail shop price. |
+| **FR-30** | If `INR=X` fetch fails → send alert with **USD only**; do **not** fail the run or skip the price alert. |
+| **FR-31** | Alert body must label INR as **parity** and note exclusion of import duty, GST, and local premium (Section 5.1). |
+| **FR-32** | Do **not** use MCX tickers, GoldAPI, or MetalpriceAPI in v1. |
+
 ---
 
 ## 4. Non-Functional Requirements
@@ -175,10 +192,13 @@ Gold trailing-low alert (GC=F)
 
 📉 Today is the lowest Gold close (GC=F) in the last **<horizon>**.
 Previous low: $<prev_min> → Today: $<current>
+India parity: ₹<current_inr_per_10g> / 10g (24K international parity, excl. import duty, GST, local premium)
 
 Timestamp: <YYYY-MM-DD HH:MM:SS IST>
 Action: Evaluate current entry positions.
 ```
+
+**INR line:** Omit if `INR=X` unavailable (FR-30). Computed via `src/pricing.py` from `$current`, `$prev_min`, and latest `INR=X` — **not** used for trigger logic.
 
 ### 5.2 Example (1-Year Trigger — Lower Windows Not Checked)
 
@@ -191,6 +211,7 @@ Gold trailing-low alert (GC=F)
 
 📉 Today is the lowest Gold close (GC=F) in the last **1 year**.
 Previous low: $1,952.00 → Today: $1,945.20
+India parity: ₹1,11,450.00 / 10g (24K international parity, excl. import duty, GST, local premium)
 
 Timestamp: 2026-07-03 08:30:15 IST
 Action: Evaluate current entry positions.
@@ -317,6 +338,7 @@ gold-price-alert/
 │   ├── __init__.py
 │   ├── main.py           # Entry: fetch → evaluate (top-down) → notify → log
 │   ├── fetcher.py        # Yahoo pull, retry, full/fallback/hard-fail routing
+│   ├── pricing.py        # GC=F USD → INR/10g for alert display (not detection)
 │   ├── analyzer.py       # Top-down short-circuit: first trigger wins
 │   ├── notifier.py       # Email + WhatsApp (price + failure alerts)
 │   ├── templates.py      # Window-specific message templates
@@ -366,13 +388,14 @@ gold-price-alert/
 - [ ] **AC-10a:** SnapDeploy container deploys from GitHub; env vars configured in dashboard; free-tier usage ≤1 wake/day.
 - [ ] **AC-11:** No secrets in git; `.env.example` lists all required vars.
 - [ ] **AC-12:** Unit tests cover short-circuit (1-Year blocks lower checks), single-window templates, no-trigger path, and failure path.
+- [ ] **AC-13:** `pricing.py` converts GC=F USD + INR=X to INR/10g; unit tests pass; alerts omit INR line if INR=X fails.
 
 ---
 
 ## 10. Implementation Order (AI Agent)
 
 1. **Scaffold** — `requirements.txt`, `src/` layout, `config.py`, `.env.example`
-2. **Templates** — `templates.py` with six window templates + failure template
+2. **Templates** — `templates.py` with six window templates + failure template + INR line via `pricing.py`
 3. **Fetcher** — `fetcher.py` with `period="1y"`, retry, full (≥252) / fallback (10–251) / hard-fail routing
 4. **Analyzer** — `analyzer.py` top-down short-circuit; returns at most one breach
 5. **Notifier** — `notifier.py` Email + WhatsApp for price and failure alerts
@@ -399,6 +422,7 @@ gold-price-alert/
 | **D9** | Price alerts (when windows trigger) → still **Email + WhatsApp**; include fallback note if degraded data was used. |
 | **D10** | **Option A adopted:** window N values use **standard market trading days** (~252/year), not calendar days. Fetch `period="1y"` — do not require 365 rows. |
 | **D11** | **SnapDeploy** is the v1 hosting platform: GitHub-connected container, free tier, auto-sleep/wake. Daily **08:30 IST** trigger via **GitHub Actions** → HTTP `/run`. No VPS/cron server management. |
+| **D12** | **India pricing (Option 1):** Detection **100% on `GC=F` USD** trailing lows. Alert text adds **INR/10g parity** via `GC=F` + `INR=X` + `src/pricing.py`. No MCX, no paid metal APIs. INR failure → USD-only alert. |
 
 ---
 
@@ -416,3 +440,6 @@ gold-price-alert/
 | **Fallback mode** | Partial API data (10–251 days): analyze recent days, skip ineligible windows, Email warning |
 | **Hard failure** | Empty or <10 days after retries: no analysis, Email critical alert |
 | **Full mode** | ≥252 trading days received — all six windows eligible |
+| **Detection pricing** | `GC=F` USD closes only — triggers and windows |
+| **Display pricing** | Optional INR/10g parity in alerts via `INR=X` + `pricing.py` — does not affect triggers |
+| **INR parity** | International 24K equivalent per 10g; not retail jeweler price |

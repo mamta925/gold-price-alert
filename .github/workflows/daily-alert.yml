@@ -1,0 +1,24 @@
+name: Daily Gold Alert
+
+on:
+  schedule:
+    # 08:30 IST = 03:00 UTC
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake SnapDeploy and run alert pipeline
+        env:
+          SNAPDEPLOY_APP_URL: ${{ secrets.SNAPDEPLOY_APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$SNAPDEPLOY_APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "Missing SNAPDEPLOY_APP_URL or CRON_SECRET repository secrets"
+            exit 1
+          fi
+          curl -sf -X POST \
+            -H "X-Cron-Secret: ${CRON_SECRET}" \
+            "${SNAPDEPLOY_APP_URL%/}/run"
