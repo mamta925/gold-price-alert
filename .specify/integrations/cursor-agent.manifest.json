@@ -1,0 +1,12 @@
+{
+  "integration": "cursor-agent",
+  "version": "0.12.5.dev0",
+  "installed_at": "2026-07-03T00:32:19.415104+00:00",
+  "files": {
+    ".cursor/skills/speckit-constitution/SKILL.md": "87f247a2e947b44f9248491dcbedbfc650d095dde6498938b6be7a413b418d5e",
+    ".cursor/skills/speckit-specify/SKILL.md": "73518d4f228a59621e96c7787051057afd389d0978b73ac7e7721991df6b3f87",
+    ".cursor/skills/speckit-plan/SKILL.md": "8c4fdc1920bd0ff1fdf17935efe8044d82437afb9935999f483556017e8540bb",
+    ".cursor/skills/speckit-tasks/SKILL.md": "e08c8def433c9964e3e4446cb5ebbd97a1a85cb046ffd4c85c3405f58593f503",
+    ".cursor/skills/speckit-implement/SKILL.md": "d31986feebd257c7ebbca443d432c6484046a951149f831281fbba61adcd5889"
+  }
+}
