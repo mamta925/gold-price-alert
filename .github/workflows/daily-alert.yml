@@ -19,6 +19,36 @@ jobs:
             echo "Missing SNAPDEPLOY_APP_URL or CRON_SECRET repository secrets"
             exit 1
           fi
-          curl -sf -X POST \
-            -H "X-Cron-Secret: ${CRON_SECRET}" \
-            "${SNAPDEPLOY_APP_URL%/}/run"
+          base="${SNAPDEPLOY_APP_URL%/}"
+
+          # SnapDeploy auto-sleeps the container; the first request returns a 503
+          # "waking up" page. Poll /health until the app itself answers 200.
+          echo "Waking container via GET $base/health ..."
+          awake=0
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$base/health" || echo 000)
+            echo "  health attempt $i -> HTTP $code"
+            if [ "$code" = "200" ]; then
+              awake=1
+              echo "Container is awake."
+              break
+            fi
+            sleep 10
+          done
+          if [ "$awake" -ne 1 ]; then
+            echo "Container did not wake within timeout."
+            exit 1
+          fi
+
+          echo "Triggering POST $base/run ..."
+          code=$(curl -s -o /tmp/run_body.txt -w "%{http_code}" --max-time 180 \
+            -X POST -H "X-Cron-Secret: ${CRON_SECRET}" "$base/run")
+          echo "POST /run -> HTTP $code"
+          echo "--- response body ---"
+          cat /tmp/run_body.txt || true
+          echo ""
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
+            echo "Run endpoint returned non-2xx status $code"
+            exit 1
+          fi
+          echo "Run succeeded."
