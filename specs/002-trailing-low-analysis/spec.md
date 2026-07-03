@@ -27,8 +27,9 @@ When the daily run has usable price history, the engine must determine whether t
 **Acceptance Scenarios**:
 
 1. **Given** ≥252 trading days in full mode, **When** `P_current <= min(last 252 closes)`, **Then** analysis returns breach for **1y** (N=252) and does not evaluate shorter windows.
-2. **Given** today's close is **not** the minimum in any eligible window, **When** analysis runs, **Then** it returns `None` (silent exit — no user notification downstream).
-3. **Given** today's close **ties** the window minimum, **When** analysis runs, **Then** that window **still triggers** (`<=` per PRD).
+2. **Given** today's close is **not** the minimum in any eligible window, **When** analysis runs top-down, **Then** it evaluates **every eligible window** (252 through 10), returns `None`, and exits silently.
+3. **Given** 1y returns **no** but 6m would return **yes**, **When** analysis runs, **Then** it continues past 1y and returns the **6m** breach.
+4. **Given** today's close **ties** the window minimum, **When** analysis runs, **Then** that window **still triggers** (`<=` per PRD).
 
 ---
 
@@ -77,7 +78,9 @@ A service layer must compose fetch → analyze → optional INR/10g parity line 
 ### Functional Requirements
 
 - **FR-001**: Analyzer MUST evaluate windows in order **252 → 126 → 63 → 21 → 15 → 10** (`prd.md` FR-06).
-- **FR-002**: Analyzer MUST **short-circuit** on first trigger; lower windows MUST NOT be evaluated (`prd.md` FR-07).
+- **FR-002**: On **yes**, analyzer MUST **short-circuit** — lower windows MUST NOT be evaluated (`prd.md` FR-07).
+- **FR-002a**: On **no**, analyzer MUST continue to the **next shorter** eligible window (`prd.md` FR-06, FR-08).
+- **FR-002b**: On **no for all** eligible windows, analyzer MUST return `None` (silent exit).
 - **FR-003**: Trigger condition MUST be `P_current <= min(Window(N))` including ties (`prd.md` §3.2).
 - **FR-004**: Analyzer MUST skip windows where `N > len(closes)` (`prd.md` fallback rules).
 - **FR-005**: Breach MUST include `current` (`P_current`) and `previous_min` = min of window **excluding today** (`prd.md` FR-11).

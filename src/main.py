@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from src.analyzer import evaluate_windows
 from src.config import AppConfig, load_config
 from src.fetcher import fetch_gold_closes
 from src.models import FetchMode, FetchResult, RunResult
@@ -14,9 +15,9 @@ from src.notifier import DispatchResult, Notifier
 from src.pricing import fetch_usd_inr_rate
 from src.service import GoldAlertService
 from src.templates import (
+    render_daily_alert,
     render_fallback_alert,
     render_hard_failure_alert,
-    render_price_alert,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,28 +104,28 @@ def run_daily_job(
         notifications.append(notify.send_system_alert(message))
 
     run = GoldAlertService(fetch_fn=lambda: fetch, inr_fn=inr_fn).run()
-
-    if not run.should_alert:
-        status = "fallback_silent" if fetch.mode is FetchMode.FALLBACK else "silent"
-        logger.info("=== Job finished status=%s (no price alert) ===", status)
-        return JobResult(status=status, run=run, notifications=tuple(notifications))
-
     breach = run.analysis.breach
-    assert breach is not None
-    fallback_days = (
-        fetch.trading_days if fetch.mode is FetchMode.FALLBACK else None
-    )
-    message = render_price_alert(
-        breach,
+    fallback_days = fetch.trading_days if fetch.mode is FetchMode.FALLBACK else None
+    message = render_daily_alert(
+        latest=fetch.closes[-1],
+        breach=breach,
+        window_evaluations=evaluate_windows(fetch.closes),
         inr_line=run.inr_line,
         timestamp=timestamp,
         fallback_trading_days=fallback_days,
-        window_closes=fetch.closes[-breach.n :],
     )
     notifications.append(notify.send_price_alert(message))
-    logger.info("=== Job finished status=price_alert ===")
+
+    if breach is not None:
+        status = "price_alert" if fetch.mode is FetchMode.FULL else "fallback_price_alert"
+    elif fetch.mode is FetchMode.FALLBACK:
+        status = "fallback_daily"
+    else:
+        status = "daily_report"
+
+    logger.info("=== Job finished status=%s ===", status)
     return JobResult(
-        status="price_alert",
+        status=status,
         run=run,
         notifications=tuple(notifications),
     )

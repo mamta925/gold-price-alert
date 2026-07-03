@@ -25,6 +25,9 @@ class TradingDayClose:
     date: date
     close: float
 
+    def __repr__(self) -> str:
+        return f"TradingDayClose({self.date}, {self.close:.2f})"
+
 
 @dataclass(frozen=True)
 class FetchResult:
@@ -35,6 +38,16 @@ class FetchResult:
     degraded_code: str | None = None
     expected_trading_days: int = EXPECTED_TRADING_DAYS
 
+    def __repr__(self) -> str:
+        latest = self.closes[-1] if self.closes else None
+        latest_part = (
+            f", latest={latest.close:.2f}@{latest.date}" if latest else ""
+        )
+        return (
+            f"FetchResult(mode={self.mode.value!r}, trading_days={self.trading_days}"
+            f"{latest_part})"
+        )
+
 
 @dataclass(frozen=True)
 class WindowBreach:
@@ -44,10 +57,19 @@ class WindowBreach:
     current: float
     previous_min: float
 
+    def __repr__(self) -> str:
+        return (
+            f"WindowBreach({self.window_key!r}, current={self.current:.2f}, "
+            f"previous_min={self.previous_min:.2f})"
+        )
+
 
 @dataclass(frozen=True)
 class AnalysisResult:
     breach: WindowBreach | None
+
+    def __repr__(self) -> str:
+        return f"AnalysisResult(breach={self.breach!r})"
 
 
 @dataclass(frozen=True)
@@ -61,4 +83,10 @@ class RunResult:
         return (
             self.fetch.mode is not FetchMode.HARD_FAILURE
             and self.analysis.breach is not None
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"RunResult(should_alert={self.should_alert}, fetch={self.fetch!r}, "
+            f"analysis={self.analysis!r})"
         )

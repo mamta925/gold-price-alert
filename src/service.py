@@ -23,37 +23,45 @@ class GoldAlertService:
     def run(self) -> RunResult:
         fetch = self._fetch()
         logger.info(
-            "fetch complete mode=%s trading_days=%s",
+            "[2/5] Using fetch result: mode=%s trading_days=%s",
             fetch.mode.value,
             fetch.trading_days,
         )
 
         if fetch.mode is FetchMode.HARD_FAILURE:
+            logger.warning("[3/5] Skipping analysis — hard fetch failure")
             return RunResult(fetch=fetch, analysis=AnalysisResult(breach=None))
 
+        logger.info("[3/5] Analyzing trailing lows (top-down short-circuit)...")
         breach = analyze_lows(fetch.closes)
         analysis = AnalysisResult(breach=breach)
 
         if breach is None:
-            logger.info("no trailing-low breach")
-            return RunResult(fetch=fetch, analysis=analysis)
+            latest = fetch.closes[-1]
+            logger.info(
+                "[3/5] Analysis complete: no breach (latest_close=%.2f) — daily report only",
+                latest.close,
+            )
+        else:
+            logger.info(
+                "[3/5] Analysis complete: breach window=%s horizon=%s current=%.2f previous_min=%.2f",
+                breach.window_key,
+                breach.horizon_label,
+                breach.current,
+                breach.previous_min,
+            )
 
-        logger.info(
-            "breach window=%s horizon=%s current=%s previous_min=%s",
-            breach.window_key,
-            breach.horizon_label,
-            breach.current,
-            breach.previous_min,
-        )
-
-        inr_line = self._build_inr_line(breach.current)
+        current = fetch.closes[-1].close
+        logger.info("[3/5] Fetching INR=X for daily report...")
+        inr_line = self._build_inr_line(current)
         return RunResult(fetch=fetch, analysis=analysis, inr_line=inr_line)
 
     def _build_inr_line(self, gold_usd: float) -> str | None:
         rate = self._inr()
         if rate is None:
-            logger.warning("INR=X unavailable; alert will use USD only")
+            logger.warning("[3/5] INR=X unavailable — alert will use USD only")
             return None
+        logger.info("[3/5] INR=X response: rate=%.4f", rate)
         return format_inr_per_10g_line(gold_usd, rate)
 
 

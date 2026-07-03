@@ -33,6 +33,33 @@ class TestAnalyzeLows:
         closes[-1] = TradingDayClose(closes[-1].date, 2100.0)
         assert analyze_lows(closes) is None
 
+    def test_no_on_all_windows_evaluates_every_eligible_window(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        import logging
+
+        closes = _closes(252, end=2000.0, step=0.5)
+        closes[-1] = TradingDayClose(closes[-1].date, 2100.0)
+        with caplog.at_level(logging.INFO, logger="src.analyzer"):
+            assert analyze_lows(closes) is None
+        continue_logs = [
+            record
+            for record in caplog.records
+            if "→ no (continue)" in record.message
+        ]
+        assert len(continue_logs) == 6
+
+    def test_no_on_1y_continues_to_shorter_window(self) -> None:
+        start = date(2024, 1, 1)
+        closes = [
+            TradingDayClose(start + timedelta(days=i), 2000.0) for i in range(252)
+        ]
+        closes[100] = TradingDayClose(closes[100].date, 1800.0)
+        closes[-1] = TradingDayClose(closes[-1].date, 1900.0)
+        breach = analyze_lows(closes)
+        assert breach is not None
+        assert breach.window_key == "6m"
+
     def test_skips_ineligible_long_windows_in_fallback(self) -> None:
         closes = _closes(180, end=2000.0, step=0.5)
         breach = analyze_lows(closes)

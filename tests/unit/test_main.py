@@ -74,7 +74,7 @@ class TestRunDailyJob:
         assert "CRITICAL_DATA_FETCH_ERROR" in messages[0].subject
         assert channels == ["email"]
 
-    def test_fallback_no_breach_sends_degraded_email_only(self) -> None:
+    def test_fallback_no_breach_sends_degraded_email_and_daily_report(self) -> None:
         fetch = _fetch(FetchMode.FALLBACK, 180)
         fetch.closes[-1] = TradingDayClose(fetch.closes[-1].date, 5000.0)
         notifier, messages, channels = _notifier_recording()
@@ -85,10 +85,11 @@ class TestRunDailyJob:
             notifier=notifier,
             now_fn=lambda: FIXED_TS,
         )
-        assert result.status == "fallback_silent"
-        assert len(messages) == 1
+        assert result.status == "fallback_daily"
+        assert len(messages) == 3
         assert "Fallback Data" in messages[0].subject
-        assert channels == ["email"]
+        assert "Gold Daily" in messages[1].subject
+        assert channels == ["email", "email", "whatsapp"]
 
     def test_price_alert_sends_email_and_whatsapp(self) -> None:
         fetch = _fetch(FetchMode.FULL, 252)
@@ -109,19 +110,24 @@ class TestRunDailyJob:
         assert channels.count("whatsapp") == 1
         assert "GOLD ALERT" in messages[-1].subject
 
-    def test_no_breach_exits_silently(self) -> None:
+    def test_no_breach_sends_daily_report(self) -> None:
         fetch = _fetch(FetchMode.FULL, 252)
         fetch.closes[-1] = TradingDayClose(fetch.closes[-1].date, 5000.0)
-        notifier, messages, _channels = _notifier_recording()
+        notifier, messages, channels = _notifier_recording()
         result = run_daily_job(
             config=_config(),
             fetch_fn=lambda: fetch,
+            inr_fn=lambda: 83.0,
             notifier=notifier,
             now_fn=lambda: FIXED_TS,
         )
-        assert result.status == "silent"
-        assert result.notifications == ()
-        assert messages == []
+        assert result.status == "daily_report"
+        assert len(result.notifications) == 1
+        assert result.notifications[0].whatsapp_sent is True
+        assert len(messages) == 2
+        assert "Gold Daily" in messages[0].subject
+        assert messages[0].body_html is not None
+        assert channels == ["email", "whatsapp"]
 
     def test_fallback_price_alert_includes_addendum(self) -> None:
         fetch = _fetch(FetchMode.FALLBACK, 180)
@@ -136,3 +142,4 @@ class TestRunDailyJob:
         assert channels == ["email", "email", "whatsapp"]
         price_body = messages[-1].body
         assert "fallback data (180 trading days" in price_body
+        assert messages[-1].body_html is not None

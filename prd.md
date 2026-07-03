@@ -110,6 +110,21 @@ P_current <= min(Window(N))
 
 In plain language: **if today's close is the lowest (or tied for lowest) in the last N trading days, that window triggers.**
 
+**Evaluation rules (one-line):**
+
+| Result on window | Action |
+|---|---|
+| **No** (today is above the window low) | Try the **next shorter** window |
+| **Yes** (today is at or below the window low) | Send **one alert** for that window and **stop** |
+| **No on all** eligible windows | **No alert** — silent exit |
+
+```text
+252 (1y) ──no──► 126 (6m) ──no──► 63 (3m) ──no──► 21 (1m) ──no──► 15 (15d) ──no──► 10 (10d) ──no──► silent exit
+252 (1y) ──yes──► alert (1y) & STOP   (6m … 10d are NOT evaluated)
+```
+
+> **Important:** Short-circuit applies only on **yes**. A **no** on 1-Year does **not** exit — it continues to 6-Month, then 3-Month, and so on until a window triggers or all are exhausted.
+
 | Evaluation Order | Window Label | N (Trading Days) | ~Calendar Equivalent | Message Key |
 |---|---|---|---|---|
 | 1 | 1-Year | **252** | ~1 calendar year | `1y` |
@@ -123,9 +138,9 @@ In plain language: **if today's close is the lowest (or tied for lowest) in the 
 
 | ID | Requirement |
 |---|---|
-| **FR-06** | Evaluate windows in **top-down order**: 252 → 126 → 63 → 21 → 15 → 10. Skip windows where `N > available_trading_days` (fallback mode). |
-| **FR-07** | **Short-circuit:** as soon as the **first (longest eligible) window** triggers, **stop** — do **not** evaluate or alert on any lower/shorter windows. |
-| **FR-08** | If **no** window triggers after full top-down pass → log locally and **exit silently** (no user notification). |
+| **FR-06** | Evaluate windows in **top-down order**: 252 → 126 → 63 → 21 → 15 → 10. Skip windows where `N > available_trading_days` (fallback mode). On **no**, continue to the next shorter window. |
+| **FR-07** | **Short-circuit on yes only:** as soon as the **first (longest eligible) window** triggers, **stop** — do **not** evaluate or alert on any lower/shorter windows. A **no** must **not** stop evaluation. |
+| **FR-08** | If **no** on every eligible window after the full top-down pass → log locally and **exit silently** (no user notification). |
 | **FR-09** | If a window triggers → send **exactly one** alert using **that window's specific template** (Section 5.1). Never bundle multiple windows in one message. |
 | **FR-10** | Example: if 1-Year triggers, send the 1-Year email/WhatsApp only — even though 10-Day would also be true mathematically, **do not check 10-Day**. |
 | **FR-11** | Include **Previous min** = `min(Window(N) excluding today)` and **Current** = `P_current` in the alert. |
@@ -413,7 +428,7 @@ gold-price-alert/
 |---|---|
 | **D1** | **Email + WhatsApp both required** for v1 (no optional channel flag). |
 | **D2** | Trigger = today's close is the **lowest in the last N trading days** — N values: **252, 126, 63, 21, 15, 10** (not calendar-day counts). |
-| **D3** | Evaluation is **top-down with short-circuit**: 252 → 126 → 63 → 21 → 15 → 10; **stop at first trigger**. |
+| **D3** | Evaluation is **top-down**: 252 → 126 → 63 → 21 → 15 → 10. **No** → next window; **yes** → one alert and stop; **no on all** → silent exit. |
 | **D4** | Send **one specific alert** for the matched window only (e.g. *"Today is the lowest in the last 1 year"*). Do not alert on lower windows when a higher window already triggered. |
 | **D5** | Cron runs **morning IST** (recommended 08:30 IST). |
 | **D6** | **Alert every day** the condition holds — no deduplication. |
@@ -433,7 +448,7 @@ gold-price-alert/
 | **Trading day** | One exchange session with a valid close price; ~252 per calendar year for US markets |
 | **Trailing window** | Last N **trading days** of closing prices, including today |
 | **Trigger / breach** | `P_current <= min(Window(N))` — today is at or below the window low |
-| **Top-down short-circuit** | Check longest window first (252-day / 1-year); on first trigger, alert and stop |
+| **Top-down short-circuit** | Walk 252 → 126 → 63 → 21 → 15 → 10. **No** → continue; **yes** → alert that window and stop; **no on all** → no alert |
 | **Previous min** | Minimum close in the window **excluding** today |
 | **Headless** | No UI; daily job triggered via protected HTTP endpoint (not interactive) |
 | **SnapDeploy** | Container host — GitHub deploy, auto-sleep when idle, wakes on HTTP traffic |

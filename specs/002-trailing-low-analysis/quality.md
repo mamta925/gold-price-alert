@@ -20,7 +20,7 @@
 ## Expected unit test counts
 
 ```text
-test_analyzer.py   → 8 passed
+test_analyzer.py   → 10 passed
 test_service.py    → 5 passed
 Full suite         → 36 passed, 1 deselected (integration)
 ```
@@ -59,7 +59,8 @@ print('inr_line:', r.inr_line)
 | PRD | Test coverage |
 |---|---|
 | FR-06 top-down order | `test_windows_ordered_top_down`, `test_new_low_triggers_longest_window_first` |
-| FR-07 short-circuit | `test_short_circuit_does_not_return_shorter_window` |
+| FR-07 short-circuit on yes | `test_short_circuit_does_not_return_shorter_window` |
+| FR-06/08 no → next window | `test_no_on_all_windows_evaluates_every_eligible_window`, `test_no_on_1y_continues_to_shorter_window` |
 | FR-08 silent no-trigger | `test_no_breach_when_today_not_lowest`, `test_no_breach_returns_without_inr` |
 | FR-11 previous min | `test_previous_min_excludes_today` |
 | FR-30 INR optional | `test_breach_without_inr_still_alerts` |

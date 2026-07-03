@@ -59,25 +59,27 @@ Reuses `FetchMode` from `001-gold-price-fetch`.
 
 ## Analysis Flow
 
+**One-line rules:** no → next window · yes → alert & stop · no on all → silent exit
+
 ```text
 [closes list]
    │
    ▼
-len < 10? ──yes──► None
+len < 10? ──yes──► None (silent)
    │
    no
    ▼
-For each window top-down:
-   N > len? ──yes──► skip
-   current <= min(window)? ──no──► next window
+For each window top-down (252 → 126 → 63 → 21 → 15 → 10):
+   N > len? ──yes──► skip (fallback)
+   current <= min(window)? ──no──► continue to NEXT window
    │
    yes
    ▼
-Return WindowBreach (STOP)
+Return WindowBreach (STOP — do not check shorter windows)
    │
-   (no match after all windows)
+   (no match after ALL eligible windows checked)
    ▼
-None
+None (silent exit)
 ```
 
 ## Service Flow

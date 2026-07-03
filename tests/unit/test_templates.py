@@ -1,8 +1,9 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from src.analyzer import evaluate_windows
 from src.models import (
     CRITICAL_DATA_FETCH_ERROR,
     EXPECTED_TRADING_DAYS,
@@ -13,7 +14,7 @@ from src.models import (
 )
 from src.templates import (
     format_timestamp_ist,
-    format_window_context_lines,
+    render_daily_alert,
     render_fallback_alert,
     render_hard_failure_alert,
     render_price_alert,
@@ -22,6 +23,7 @@ from src.templates import (
 
 IST = ZoneInfo("Asia/Kolkata")
 FIXED_TS = datetime(2026, 7, 3, 8, 30, 15, tzinfo=IST)
+LATEST = TradingDayClose(date=date(2026, 7, 2), close=1945.20)
 
 
 def _breach(window_key: str, horizon: str, n: int) -> WindowBreach:
@@ -32,6 +34,18 @@ def _breach(window_key: str, horizon: str, n: int) -> WindowBreach:
         current=1945.20,
         previous_min=1952.00,
     )
+
+
+def _evaluations_for_breach(breach: WindowBreach) -> list:
+    closes = [
+        TradingDayClose(date=date(2026, 6, 24), close=3990.30),
+        TradingDayClose(date=date(2026, 6, 26), close=4078.70),
+        TradingDayClose(date=date(2026, 6, 29), close=4022.30),
+        TradingDayClose(date=date(2026, 6, 30), close=4022.90),
+        TradingDayClose(date=date(2026, 7, 1), close=4068.30),
+        TradingDayClose(date=date(2026, 7, 2), close=1945.20),
+    ]
+    return evaluate_windows(closes)
 
 
 @pytest.mark.parametrize(
@@ -53,96 +67,113 @@ class TestWindowSpecificSubjects:
         n: int,
         subject_phrase: str,
     ) -> None:
-        msg = render_price_alert(
-            _breach(window_key, horizon, n),
+        breach = _breach(window_key, horizon, n)
+        msg = render_daily_alert(
+            latest=LATEST,
+            breach=breach,
+            window_evaluations=_evaluations_for_breach(breach),
             inr_line=None,
             timestamp=FIXED_TS,
         )
         assert msg.subject == (
-            f"🚨 GOLD ALERT: $1,945.20 — Today is the lowest in the last {subject_phrase}"
+            f"🚨 GOLD ALERT: $1,945.20 — Lowest in the last {subject_phrase}"
         )
 
 
-class TestPriceAlertBody:
+class TestDailyAlertBody:
     def test_body_includes_usd_values_and_timestamp(self) -> None:
-        msg = render_price_alert(
-            _breach("1y", "1 year", 252),
+        breach = _breach("1y", "1 year", 252)
+        msg = render_daily_alert(
+            latest=LATEST,
+            breach=breach,
+            window_evaluations=_evaluations_for_breach(breach),
             inr_line=None,
             timestamp=FIXED_TS,
         )
-        assert "Gold trailing-low alert (GC=F)" in msg.body
-        assert "📉 Today is the lowest Gold close (GC=F) in the last **1 year**." in msg.body
+        assert "Gold Daily Report (GC=F)" in msg.body
+        assert "Today's close: $1,945.20" in msg.body
+        assert "Today is the lowest close in the last 1 year" in msg.body
         assert "Previous low: $1,952.00 → Today: $1,945.20" in msg.body
         assert "Timestamp: 2026-07-03 08:30:15 IST" in msg.body
         assert "Action: Evaluate current entry positions." in msg.body
+
+    def test_no_breach_body_states_not_at_low(self) -> None:
+        msg = render_daily_alert(
+            latest=TradingDayClose(date=date(2026, 7, 2), close=4195.80),
+            breach=None,
+            window_evaluations=_evaluations_for_breach(_breach("10d", "10 days", 10)),
+            inr_line=None,
+            timestamp=FIXED_TS,
+        )
+        assert msg.subject == "📊 Gold Daily: $4,195.80 — Not at trailing low"
+        assert "Today is not at a trailing low" in msg.body
+        assert "Action:" not in msg.body
 
     def test_body_includes_inr_line_when_provided(self) -> None:
         inr_line = (
             "India parity: ₹1,11,450.00 / 10g "
             "(24K international parity per 10g (excl. import duty, GST, local premium))"
         )
-        msg = render_price_alert(
-            _breach("1y", "1 year", 252),
+        msg = render_daily_alert(
+            latest=LATEST,
+            breach=_breach("1y", "1 year", 252),
+            window_evaluations=_evaluations_for_breach(_breach("1y", "1 year", 252)),
             inr_line=inr_line,
             timestamp=FIXED_TS,
         )
         assert inr_line in msg.body
 
     def test_body_omits_inr_when_none(self) -> None:
-        msg = render_price_alert(
-            _breach("1y", "1 year", 252),
+        msg = render_daily_alert(
+            latest=LATEST,
+            breach=_breach("1y", "1 year", 252),
+            window_evaluations=_evaluations_for_breach(_breach("1y", "1 year", 252)),
             inr_line=None,
             timestamp=FIXED_TS,
         )
         assert "India parity:" not in msg.body
 
     def test_body_appends_fallback_addendum(self) -> None:
-        msg = render_price_alert(
-            _breach("6m", "6 months", 126),
+        msg = render_daily_alert(
+            latest=LATEST,
+            breach=_breach("6m", "6 months", 126),
+            window_evaluations=_evaluations_for_breach(_breach("6m", "6 months", 126)),
             inr_line=None,
             timestamp=FIXED_TS,
             fallback_trading_days=180,
         )
         assert (
-            "⚠️ Note: This alert used fallback data "
+            "⚠️ Note: This report used fallback data "
             "(180 trading days available, not full 252-day / 1-year history)."
         ) in msg.body
 
-    def test_body_omits_fallback_addendum_in_full_mode(self) -> None:
-        msg = render_price_alert(
-            _breach("1y", "1 year", 252),
+    def test_html_includes_gold_image_and_price(self) -> None:
+        msg = render_daily_alert(
+            latest=LATEST,
+            breach=None,
+            window_evaluations=_evaluations_for_breach(_breach("10d", "10 days", 10)),
             inr_line=None,
             timestamp=FIXED_TS,
-            fallback_trading_days=None,
         )
-        assert "fallback data" not in msg.body
+        assert msg.body_html is not None
+        assert "data:image/svg+xml" in msg.body_html
+        assert "$1,945.20" in msg.body_html
+        assert "NOT AT LOW" in msg.body_html
+        assert "Window Scan" in msg.body_html
 
-    def test_body_includes_window_context_when_closes_provided(self) -> None:
+    def test_render_price_alert_wrapper_still_works(self) -> None:
         closes = [
             TradingDayClose(date=date(2026, 6, 24), close=3990.30),
-            TradingDayClose(date=date(2026, 6, 26), close=4078.70),
-            TradingDayClose(date=date(2026, 6, 29), close=4022.30),
-            TradingDayClose(date=date(2026, 6, 30), close=4022.90),
-            TradingDayClose(date=date(2026, 7, 1), close=4068.30),
-            TradingDayClose(date=date(2026, 7, 2), close=4195.80),
+            TradingDayClose(date=date(2026, 7, 2), close=1945.20),
         ]
-        breach = WindowBreach(
-            window_key="10d",
-            horizon_label="10 days",
-            n=10,
-            current=4195.80,
-            previous_min=4022.30,
-        )
         msg = render_price_alert(
-            breach,
+            _breach("10d", "10 days", 10),
             inr_line=None,
             timestamp=FIXED_TS,
             window_closes=closes,
         )
-        assert "Window context (10 days, 10 trading days):" in msg.body
-        assert "Window low: $3,990.30 on 2026-06-24" in msg.body
-        assert "Last 5 trading days:" in msg.body
-        assert "2026-07-02: $4,195.80" in msg.body
+        assert msg.body_html is not None
+        assert "TRAILING LOW" in msg.body_html
 
 
 class TestHardFailureTemplate:

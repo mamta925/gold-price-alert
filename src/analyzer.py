@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date
 
 from src.models import TradingDayClose, WindowBreach
 
@@ -31,8 +32,58 @@ WINDOWS_TOP_DOWN: tuple[WindowDefinition, ...] = (
     WindowDefinition("10d", "10 days", 10),
 )
 
+@dataclass(frozen=True)
+class WindowEvaluation:
+    window_key: str
+    horizon_label: str
+    n: int
+    window_min: float
+    min_date: date
+    is_lowest: bool
+    skipped: bool
+
+
 def min_close_day(closes: list[TradingDayClose]) -> TradingDayClose:
     return min(closes, key=lambda day: day.close)
+
+
+def evaluate_windows(closes: list[TradingDayClose]) -> list[WindowEvaluation]:
+    if not closes:
+        return []
+
+    current = closes[-1].close
+    evaluations: list[WindowEvaluation] = []
+
+    for window in WINDOWS_TOP_DOWN:
+        if window.n > len(closes):
+            evaluations.append(
+                WindowEvaluation(
+                    window_key=window.key,
+                    horizon_label=window.horizon_label,
+                    n=window.n,
+                    window_min=0.0,
+                    min_date=closes[-1].date,
+                    is_lowest=False,
+                    skipped=True,
+                )
+            )
+            continue
+
+        window_closes = closes[-window.n :]
+        min_day = min_close_day(window_closes)
+        evaluations.append(
+            WindowEvaluation(
+                window_key=window.key,
+                horizon_label=window.horizon_label,
+                n=window.n,
+                window_min=min_day.close,
+                min_date=min_day.date,
+                is_lowest=current <= min_day.close,
+                skipped=False,
+            )
+        )
+
+    return evaluations
 
 
 def _min_close_day(closes: list[TradingDayClose]) -> TradingDayClose:

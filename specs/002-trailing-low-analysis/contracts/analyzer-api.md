@@ -16,8 +16,9 @@ WINDOWS_TOP_DOWN: tuple[WindowDefinition, ...]
 ```python
 def analyze_lows(closes: list[TradingDayClose]) -> WindowBreach | None:
     """
-    Evaluate trailing-low windows top-down. Return the first (longest
-    eligible) breach, or None if no window triggers.
+    Evaluate trailing-low windows top-down (252 → … → 10).
+
+    Rules: no → next window; yes → return breach & stop; no on all → None.
     """
 ```
 
@@ -28,10 +29,13 @@ def analyze_lows(closes: list[TradingDayClose]) -> WindowBreach | None:
 **Postconditions**:
 - Returns `None` if `len(closes) < 10`
 - Skips windows where `window.n > len(closes)`
-- At most one breach; short-circuits on first `current <= window_min`
+- On **no**, evaluates the next shorter eligible window (does not stop early)
+- On **yes**, returns immediately — shorter windows are not evaluated
+- On **no for all**, returns `None`
+- At most one breach
 - `breach.current == closes[-1].close`
 
-**Side effects**: None (pure function)
+**Side effects**: INFO log per window evaluated (`[3/5] Window … → no (continue)` or `→ TRIGGER (stop)`)
 
 ---
 

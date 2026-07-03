@@ -35,10 +35,19 @@ class TestGoldAlertService:
         assert result.analysis.breach is None
         assert result.should_alert is False
 
-    def test_no_breach_returns_without_inr(self) -> None:
+    def test_no_breach_includes_inr_line_when_rate_available(self) -> None:
         fetch = _fetch_result(FetchMode.FULL, 252, end=3000.0)
         fetch.closes[-1] = TradingDayClose(fetch.closes[-1].date, 4000.0)
-        service = GoldAlertService(fetch_fn=lambda: fetch)
+        service = GoldAlertService(fetch_fn=lambda: fetch, inr_fn=lambda: 83.0)
+        result = service.run()
+        assert result.should_alert is False
+        assert result.inr_line is not None
+        assert "India parity:" in result.inr_line
+
+    def test_no_breach_without_inr_when_rate_unavailable(self) -> None:
+        fetch = _fetch_result(FetchMode.FULL, 252, end=3000.0)
+        fetch.closes[-1] = TradingDayClose(fetch.closes[-1].date, 4000.0)
+        service = GoldAlertService(fetch_fn=lambda: fetch, inr_fn=lambda: None)
         result = service.run()
         assert result.should_alert is False
         assert result.inr_line is None

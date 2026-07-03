@@ -84,54 +84,67 @@ def fetch_gold_closes(
 
     for attempt in range(1, max_retries + 1):
         try:
+            logger.info(
+                "[1/5] Fetching %s from Yahoo Finance (attempt %s/%s, period=%s)...",
+                ticker,
+                attempt,
+                max_retries,
+                period,
+            )
             df = _fetch_history(ticker, period)
             closes = normalize_closes(df)
-            logger.info(
-                "fetch attempt=%s ticker=%s rows=%s",
-                attempt,
-                ticker,
-                len(closes),
-            )
 
             if not closes:
+                logger.warning(
+                    "[1/5] Fetch returned no valid closes (attempt %s/%s)",
+                    attempt,
+                    max_retries,
+                )
                 if attempt < max_retries:
+                    logger.info("[1/5] Retrying in %ss...", retry_delay_seconds)
                     sleep_fn(retry_delay_seconds)
                     continue
                 break
 
             result = _build_result(closes)
+            latest = closes[-1]
+            logger.info(
+                "[2/5] Fetch response: mode=%s trading_days=%s latest_close=%.2f date=%s",
+                result.mode.value,
+                result.trading_days,
+                latest.close,
+                latest.date,
+            )
             if result.mode is FetchMode.HARD_FAILURE:
                 logger.warning(
-                    "hard failure insufficient rows=%s ticker=%s",
+                    "[2/5] Insufficient data for analysis (rows=%s, minimum=%s)",
                     len(closes),
-                    ticker,
+                    FALLBACK_MIN_DAYS,
                 )
             elif result.mode is FetchMode.FALLBACK:
                 logger.warning(
-                    "fallback mode rows=%s expected=%s ticker=%s",
+                    "[2/5] Fallback data: received=%s expected=%s",
                     result.trading_days,
                     EXPECTED_TRADING_DAYS,
-                    ticker,
                 )
-            else:
-                logger.info("full mode rows=%s ticker=%s", result.trading_days, ticker)
             return result
 
         except Exception as exc:
             last_error = exc
             logger.warning(
-                "fetch attempt=%s failed ticker=%s error=%s",
+                "[1/5] Fetch error on attempt %s/%s: %s",
                 attempt,
-                ticker,
-                type(exc).__name__,
+                max_retries,
+                exc,
             )
             if attempt < max_retries:
+                logger.info("[1/5] Retrying in %ss...", retry_delay_seconds)
                 sleep_fn(retry_delay_seconds)
 
     logger.error(
-        "critical fetch failure ticker=%s error=%s",
-        ticker,
-        type(last_error).__name__ if last_error else "empty_data",
+        "[2/5] Fetch failed after %s attempts: %s",
+        max_retries,
+        last_error or "empty_data",
     )
     return FetchResult(
         mode=FetchMode.HARD_FAILURE,
