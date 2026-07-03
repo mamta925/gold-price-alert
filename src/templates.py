@@ -13,7 +13,8 @@ from src.models import (
     TradingDayClose,
     WindowBreach,
 )
-from src.pricing import format_usd
+from src.email_assets import GOLD_HEADER_IMAGE_SRC
+from src.pricing import IndiaGoldQuote, format_inr, format_usd
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -25,19 +26,6 @@ WINDOW_SKIP_LABELS: dict[str, str] = {
     "15d": "15-Day",
     "10d": "10-Day",
 }
-
-GOLD_BAR_IMAGE_SRC = (
-    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 80'%3E"
-    "%3Cdefs%3E%3ClinearGradient id='g' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E"
-    "%3Cstop offset='0%25' stop-color='%23f9e076'/%3E"
-    "%3Cstop offset='50%25' stop-color='%23d4af37'/%3E"
-    "%3Cstop offset='100%25' stop-color='%23a67c00'/%3E"
-    "%3C/linearGradient%3E%3C/defs%3E"
-    "%3Crect x='10' y='25' width='100' height='30' rx='4' fill='url(%23g)' "
-    "stroke='%238b6914' stroke-width='2'/%3E"
-    "%3Crect x='18' y='32' width='84' height='6' rx='2' fill='%23fff3c4' opacity='0.35'/%3E"
-    "%3C/svg%3E"
-)
 
 
 @dataclass(frozen=True)
@@ -84,19 +72,46 @@ def _daily_subject(latest: TradingDayClose, breach: WindowBreach | None) -> str:
             f"🚨 GOLD ALERT: {current_usd} — "
             f"Lowest in the last {breach.horizon_label}"
         )
-    return f"📊 Gold Daily: {current_usd} — Not at trailing low"
+    return f"🪙 Gold Daily: {current_usd} — Not at trailing low"
 
 
-def _format_inr_html(inr_line: str | None) -> str:
-    if inr_line is None:
+def _format_india_quote_html(quote: IndiaGoldQuote | None) -> str:
+    if quote is None:
         return ""
-    if inr_line.startswith("India parity: "):
-        value = inr_line.removeprefix("India parity: ")
-        return (
-            f'<p style="margin:8px 0 0;font-size:16px;color:#f5e6b8;">'
-            f"{value}</p>"
-        )
-    return f'<p style="margin:8px 0 0;font-size:16px;color:#f5e6b8;">{inr_line}</p>'
+    duty_pct = int(quote.import_duty_rate * 100)
+    premium_pct = int(quote.local_premium_rate * 100)
+    return f"""
+              <div style="margin-top:20px;padding:16px 18px;background:#1f1f33;border-radius:12px;border:1px solid #3d3d5c;text-align:left;">
+                <p style="margin:0 0 12px;font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#d4af37;">
+                  India 24K Reference
+                </p>
+                <p style="margin:0 0 6px;font-size:13px;color:#9ca3af;line-height:1.5;">
+                  Spot: {format_usd(quote.gold_usd_per_oz)}/oz → {format_usd(quote.usd_per_10g)}/10g
+                  @ ₹{quote.usd_inr_rate:.2f}/USD
+                </p>
+                <p style="margin:0;font-size:15px;color:#e5e7eb;line-height:1.5;">
+                  International parity:
+                  <strong style="color:#fbbf24;">{format_inr(quote.parity_per_10g)}</strong> / 10g
+                  <span style="color:#9ca3af;">({format_inr(quote.parity_per_gram)} / g)</span>
+                </p>
+                <p style="margin:10px 0 0;font-size:15px;color:#e5e7eb;line-height:1.5;">
+                  India retail estimate:
+                  <strong style="color:#fbbf24;">{format_inr(quote.retail_per_10g)}</strong> / 10g
+                  <span style="color:#9ca3af;">({format_inr(quote.retail_per_gram)} / g)</span>
+                </p>
+                <p style="margin:10px 0 0;font-size:11px;color:#9ca3af;line-height:1.5;">
+                  = parity + {duty_pct}% import duty + {premium_pct}% local premium.
+                  Excludes GST &amp; making charges.
+                </p>
+              </div>"""
+
+
+def _format_india_quote_text(quote: IndiaGoldQuote | None) -> list[str]:
+    if quote is None:
+        return []
+    from src.pricing import format_india_gold_summary
+
+    return ["", format_india_gold_summary(quote)]
 
 
 def _window_rows_html(evaluations: list[WindowEvaluation]) -> str:
@@ -138,7 +153,7 @@ def _render_daily_html(
     latest: TradingDayClose,
     breach: WindowBreach | None,
     evaluations: list[WindowEvaluation],
-    inr_line: str | None,
+    india_quote: IndiaGoldQuote | None,
     timestamp: datetime,
     fallback_trading_days: int | None,
 ) -> str:
@@ -181,8 +196,8 @@ def _render_daily_html(
                style="max-width:600px;width:100%;border-collapse:collapse;">
           <tr>
             <td style="padding:28px 24px;background:linear-gradient(135deg,#3d2b00 0%,#1a1408 55%,#0f0f1a 100%);border-radius:16px 16px 0 0;border:1px solid #5c4a1f;border-bottom:none;text-align:center;">
-              <img src="{GOLD_BAR_IMAGE_SRC}" alt="Gold bar" width="120" height="80"
-                   style="display:block;margin:0 auto 16px;">
+              <img src="{GOLD_HEADER_IMAGE_SRC}" alt="Gold" width="140"
+                   style="display:block;margin:0 auto 16px;border-radius:12px;">
               <p style="margin:0 0 6px;font-size:13px;letter-spacing:2px;text-transform:uppercase;color:#d4af37;">
                 GC=F Daily Report
               </p>
@@ -202,7 +217,7 @@ def _render_daily_html(
               <p style="margin:0;font-size:46px;line-height:1.1;font-weight:700;color:#fbbf24;">
                 {current_usd}
               </p>
-              {_format_inr_html(inr_line)}
+              {_format_india_quote_html(india_quote)}
               <div style="display:inline-block;margin-top:20px;padding:10px 18px;background:{badge_bg};border:1px solid {badge_border};border-radius:999px;color:#fff7ed;font-size:13px;font-weight:700;letter-spacing:0.5px;">
                 {badge_text}
               </div>
@@ -235,7 +250,7 @@ def _render_daily_html(
             <td style="padding:20px 24px;background:#12121f;border:1px solid #2d2d44;border-top:none;border-radius:0 0 16px 16px;text-align:center;">
               <p style="margin:0;font-size:12px;color:#9ca3af;line-height:1.6;">
                 {ts}<br>
-                Source: Yahoo Finance GC=F · India parity is indicative only.
+                Source: Yahoo Finance GC=F · India estimates are indicative only.
               </p>
               {"<p style='margin:12px 0 0;font-size:13px;color:#fbbf24;font-weight:700;'>Action: Evaluate current entry positions.</p>" if breach is not None else ""}
             </td>
@@ -253,7 +268,7 @@ def _render_daily_text(
     latest: TradingDayClose,
     breach: WindowBreach | None,
     evaluations: list[WindowEvaluation],
-    inr_line: str | None,
+    india_quote: IndiaGoldQuote | None,
     timestamp: datetime,
     fallback_trading_days: int | None,
 ) -> str:
@@ -265,8 +280,7 @@ def _render_daily_text(
         _status_headline(breach),
         _status_detail(breach, format_usd(latest.close)),
     ]
-    if inr_line is not None:
-        lines.append(inr_line)
+    lines.extend(_format_india_quote_text(india_quote))
     lines.extend(["", "Window scan:"])
     for evaluation in evaluations:
         if evaluation.skipped:
@@ -297,7 +311,7 @@ def render_daily_alert(
     latest: TradingDayClose,
     breach: WindowBreach | None,
     window_evaluations: list[WindowEvaluation],
-    inr_line: str | None,
+    india_quote: IndiaGoldQuote | None,
     timestamp: datetime,
     fallback_trading_days: int | None = None,
 ) -> AlertMessage:
@@ -306,7 +320,7 @@ def render_daily_alert(
         latest=latest,
         breach=breach,
         evaluations=window_evaluations,
-        inr_line=inr_line,
+        india_quote=india_quote,
         timestamp=timestamp,
         fallback_trading_days=fallback_trading_days,
     )
@@ -314,7 +328,7 @@ def render_daily_alert(
         latest=latest,
         breach=breach,
         evaluations=window_evaluations,
-        inr_line=inr_line,
+        india_quote=india_quote,
         timestamp=timestamp,
         fallback_trading_days=fallback_trading_days,
     )
@@ -324,7 +338,7 @@ def render_daily_alert(
 def render_price_alert(
     breach: WindowBreach,
     *,
-    inr_line: str | None,
+    india_quote: IndiaGoldQuote | None,
     timestamp: datetime,
     fallback_trading_days: int | None = None,
     window_closes: list[TradingDayClose] | None = None,
@@ -340,7 +354,7 @@ def render_price_alert(
         latest=latest,
         breach=breach,
         window_evaluations=evaluate_windows(window_closes or [latest]),
-        inr_line=inr_line,
+        india_quote=india_quote,
         timestamp=timestamp,
         fallback_trading_days=fallback_trading_days,
     )

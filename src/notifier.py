@@ -5,8 +5,12 @@ import smtplib
 from collections.abc import Callable
 from dataclasses import dataclass
 from email.message import EmailMessage
+from email.mime.image import MIMEImage
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 from src.config import AppConfig
+from src.email_assets import GOLD_HEADER_CID, GOLD_HEADER_FILENAME, GOLD_HEADER_PATH
 from src.templates import AlertMessage
 
 logger = logging.getLogger(__name__)
@@ -21,15 +25,56 @@ class DispatchResult:
     whatsapp_sent: bool
 
 
+def build_email_message(config: AppConfig, message: AlertMessage) -> EmailMessage | MIMEMultipart:
+    needs_inline_image = (
+        message.body_html is not None
+        and GOLD_HEADER_CID in message.body_html
+        and GOLD_HEADER_PATH.is_file()
+    )
+
+    if message.body_html is None:
+        email = EmailMessage()
+        email["Subject"] = message.subject
+        email["From"] = config.alert_email_from
+        email["To"] = config.alert_email_to
+        email.set_content(message.body)
+        return email
+
+    if not needs_inline_image:
+        if GOLD_HEADER_CID in message.body_html and not GOLD_HEADER_PATH.is_file():
+            logger.warning(
+                "[4/5] Header image missing at %s — email will show broken image",
+                GOLD_HEADER_PATH,
+            )
+        email = EmailMessage()
+        email["Subject"] = message.subject
+        email["From"] = config.alert_email_from
+        email["To"] = config.alert_email_to
+        email.set_content(message.body)
+        email.add_alternative(message.body_html, subtype="html")
+        return email
+
+    root = MIMEMultipart("related")
+    root["Subject"] = message.subject
+    root["From"] = config.alert_email_from
+    root["To"] = config.alert_email_to
+
+    alternative = MIMEMultipart("alternative")
+    alternative.attach(MIMEText(message.body, "plain", "utf-8"))
+    alternative.attach(MIMEText(message.body_html, "html", "utf-8"))
+    root.attach(alternative)
+
+    with GOLD_HEADER_PATH.open("rb") as img_file:
+        image = MIMEImage(img_file.read(), _subtype="png")
+    image.add_header("Content-ID", f"<{GOLD_HEADER_CID}>")
+    image.add_header("Content-Disposition", "inline", filename=GOLD_HEADER_FILENAME)
+    root.attach(image)
+    return root
+
+
 def _default_email_send(config: AppConfig, message: AlertMessage) -> bool:
     logger.info("[4/5] Sending email...")
-    email = EmailMessage()
-    email["Subject"] = message.subject
-    email["From"] = config.alert_email_from
-    email["To"] = config.alert_email_to
-    email.set_content(message.body)
-    if message.body_html is not None:
-        email.add_alternative(message.body_html, subtype="html")
+    email = build_email_message(config, message)
     with smtplib.SMTP_SSL(config.smtp_host, config.smtp_port) as server:
         server.login(config.smtp_user, config.smtp_password)
         server.send_message(email)

@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.pricing import IndiaGoldQuote
 
 CRITICAL_DATA_FETCH_ERROR = "CRITICAL_DATA_FETCH_ERROR"
 DATA_FETCH_DEGRADED = "DATA_FETCH_DEGRADED"
@@ -76,7 +80,15 @@ class AnalysisResult:
 class RunResult:
     fetch: FetchResult
     analysis: AnalysisResult
-    inr_line: str | None = None
+    india_quote: IndiaGoldQuote | None = None
+
+    @property
+    def inr_line(self) -> str | None:
+        if self.india_quote is None:
+            return None
+        from src.pricing import format_india_gold_summary
+
+        return format_india_gold_summary(self.india_quote)
 
     @property
     def should_alert(self) -> bool:

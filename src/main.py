@@ -110,7 +110,7 @@ def run_daily_job(
         latest=fetch.closes[-1],
         breach=breach,
         window_evaluations=evaluate_windows(fetch.closes),
-        inr_line=run.inr_line,
+        india_quote=run.india_quote,
         timestamp=timestamp,
         fallback_trading_days=fallback_days,
     )

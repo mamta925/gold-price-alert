@@ -12,6 +12,8 @@ from src.models import (
     TradingDayClose,
     WindowBreach,
 )
+from src.email_assets import GOLD_HEADER_CID, GOLD_HEADER_IMAGE_SRC
+from src.pricing import build_india_gold_quote
 from src.templates import (
     format_timestamp_ist,
     render_daily_alert,
@@ -72,7 +74,7 @@ class TestWindowSpecificSubjects:
             latest=LATEST,
             breach=breach,
             window_evaluations=_evaluations_for_breach(breach),
-            inr_line=None,
+            india_quote=None,
             timestamp=FIXED_TS,
         )
         assert msg.subject == (
@@ -87,7 +89,7 @@ class TestDailyAlertBody:
             latest=LATEST,
             breach=breach,
             window_evaluations=_evaluations_for_breach(breach),
-            inr_line=None,
+            india_quote=None,
             timestamp=FIXED_TS,
         )
         assert "Gold Daily Report (GC=F)" in msg.body
@@ -102,43 +104,45 @@ class TestDailyAlertBody:
             latest=TradingDayClose(date=date(2026, 7, 2), close=4195.80),
             breach=None,
             window_evaluations=_evaluations_for_breach(_breach("10d", "10 days", 10)),
-            inr_line=None,
+            india_quote=None,
             timestamp=FIXED_TS,
         )
-        assert msg.subject == "📊 Gold Daily: $4,195.80 — Not at trailing low"
+        assert msg.subject == "🪙 Gold Daily: $4,195.80 — Not at trailing low"
         assert "Today is not at a trailing low" in msg.body
         assert "Action:" not in msg.body
 
-    def test_body_includes_inr_line_when_provided(self) -> None:
-        inr_line = (
-            "India parity: ₹1,11,450.00 / 10g "
-            "(24K international parity per 10g (excl. import duty, GST, local premium))"
-        )
+    def test_body_includes_india_quote_when_provided(self) -> None:
+        quote = build_india_gold_quote(1945.20, 83.0)
         msg = render_daily_alert(
             latest=LATEST,
             breach=_breach("1y", "1 year", 252),
             window_evaluations=_evaluations_for_breach(_breach("1y", "1 year", 252)),
-            inr_line=inr_line,
+            india_quote=quote,
             timestamp=FIXED_TS,
         )
-        assert inr_line in msg.body
+        assert "International parity:" in msg.body
+        assert "India retail estimate:" in msg.body
+        assert "/ 10g" in msg.body
+        assert "/ g" in msg.body
+        assert quote.retail_per_10g > quote.parity_per_10g
 
-    def test_body_omits_inr_when_none(self) -> None:
+    def test_body_omits_india_quote_when_none(self) -> None:
         msg = render_daily_alert(
             latest=LATEST,
             breach=_breach("1y", "1 year", 252),
             window_evaluations=_evaluations_for_breach(_breach("1y", "1 year", 252)),
-            inr_line=None,
+            india_quote=None,
             timestamp=FIXED_TS,
         )
-        assert "India parity:" not in msg.body
+        assert "International parity:" not in msg.body
+        assert "India retail estimate:" not in msg.body
 
     def test_body_appends_fallback_addendum(self) -> None:
         msg = render_daily_alert(
             latest=LATEST,
             breach=_breach("6m", "6 months", 126),
             window_evaluations=_evaluations_for_breach(_breach("6m", "6 months", 126)),
-            inr_line=None,
+            india_quote=None,
             timestamp=FIXED_TS,
             fallback_trading_days=180,
         )
@@ -147,19 +151,17 @@ class TestDailyAlertBody:
             "(180 trading days available, not full 252-day / 1-year history)."
         ) in msg.body
 
-    def test_html_includes_gold_image_and_price(self) -> None:
+    def test_html_includes_gold_coin_and_india_pricing(self) -> None:
         msg = render_daily_alert(
             latest=LATEST,
             breach=None,
             window_evaluations=_evaluations_for_breach(_breach("10d", "10 days", 10)),
-            inr_line=None,
+            india_quote=build_india_gold_quote(1945.20, 83.0),
             timestamp=FIXED_TS,
         )
         assert msg.body_html is not None
-        assert "data:image/svg+xml" in msg.body_html
-        assert "$1,945.20" in msg.body_html
-        assert "NOT AT LOW" in msg.body_html
-        assert "Window Scan" in msg.body_html
+        assert GOLD_HEADER_IMAGE_SRC in msg.body_html
+        assert "India 24K Reference" in msg.body_html
 
     def test_render_price_alert_wrapper_still_works(self) -> None:
         closes = [
@@ -168,7 +170,7 @@ class TestDailyAlertBody:
         ]
         msg = render_price_alert(
             _breach("10d", "10 days", 10),
-            inr_line=None,
+            india_quote=None,
             timestamp=FIXED_TS,
             window_closes=closes,
         )

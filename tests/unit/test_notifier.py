@@ -3,8 +3,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.config import AppConfig
+from src.email_assets import GOLD_HEADER_CID
 from src.templates import AlertMessage
-from src.notifier import DispatchResult, Notifier
+from src.notifier import DispatchResult, Notifier, build_email_message
 
 
 def _config() -> AppConfig:
@@ -74,3 +75,16 @@ class TestNotifier:
         )
         result = notifier.send_price_alert(_message())
         assert result == DispatchResult(email_sent=True, whatsapp_sent=False)
+
+    def test_build_email_message_attaches_inline_header_image(self) -> None:
+        message = AlertMessage(
+            subject="Gold Daily",
+            body="plain text",
+            body_html=f'<html><body><img src="cid:{GOLD_HEADER_CID}"></body></html>',
+        )
+        email = build_email_message(_config(), message)
+        assert email.get_content_type() == "multipart/related"
+        parts = list(email.walk())
+        assert any(part.get_content_type() == "image/png" for part in parts)
+        image_part = next(part for part in parts if part.get_content_type() == "image/png")
+        assert image_part["Content-ID"] == f"<{GOLD_HEADER_CID}>"

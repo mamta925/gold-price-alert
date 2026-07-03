@@ -6,7 +6,7 @@ from collections.abc import Callable
 from src.analyzer import analyze_lows
 from src.fetcher import fetch_gold_closes
 from src.models import AnalysisResult, FetchMode, FetchResult, RunResult
-from src.pricing import fetch_usd_inr_rate, format_inr_per_10g_line
+from src.pricing import build_india_gold_quote, fetch_usd_inr_rate
 
 logger = logging.getLogger(__name__)
 
@@ -53,16 +53,22 @@ class GoldAlertService:
 
         current = fetch.closes[-1].close
         logger.info("[3/5] Fetching INR=X for daily report...")
-        inr_line = self._build_inr_line(current)
-        return RunResult(fetch=fetch, analysis=analysis, inr_line=inr_line)
+        india_quote = self._build_india_quote(current)
+        return RunResult(fetch=fetch, analysis=analysis, india_quote=india_quote)
 
-    def _build_inr_line(self, gold_usd: float) -> str | None:
+    def _build_india_quote(self, gold_usd: float):
         rate = self._inr()
         if rate is None:
             logger.warning("[3/5] INR=X unavailable — alert will use USD only")
             return None
         logger.info("[3/5] INR=X response: rate=%.4f", rate)
-        return format_inr_per_10g_line(gold_usd, rate)
+        quote = build_india_gold_quote(gold_usd, rate)
+        logger.info(
+            "[3/5] India 24K reference: parity=%.2f/10g retail_est=%.2f/10g",
+            quote.parity_per_10g,
+            quote.retail_per_10g,
+        )
+        return quote
 
 
 def run_daily_analysis() -> RunResult:

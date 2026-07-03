@@ -2,7 +2,11 @@ import pytest
 
 from src.pricing import (
     GRAMS_PER_10G,
+    IMPORT_DUTY_RATE,
+    LOCAL_PREMIUM_RATE,
     TROY_OZ_GRAMS,
+    build_india_gold_quote,
+    format_india_gold_summary,
     format_inr,
     format_inr_per_10g_line,
     format_usd,
@@ -23,6 +27,30 @@ class TestUsdGoldToInrPer10g:
             usd_gold_to_inr_per_10g(0, 83.0)
         with pytest.raises(ValueError):
             usd_gold_to_inr_per_10g(2000.0, 0)
+
+
+class TestIndiaGoldQuote:
+    def test_builds_parity_and_retail_per_10g(self) -> None:
+        quote = build_india_gold_quote(4190.0, 95.19)
+        assert quote.usd_per_10g == pytest.approx((4190.0 / TROY_OZ_GRAMS) * 10)
+        assert quote.parity_per_10g == pytest.approx(
+            usd_gold_to_inr_per_10g(4190.0, 95.19)
+        )
+        assert quote.parity_per_gram == pytest.approx(quote.parity_per_10g / 10)
+        assert quote.retail_per_10g == pytest.approx(
+            quote.parity_per_10g * (1 + IMPORT_DUTY_RATE) * (1 + LOCAL_PREMIUM_RATE)
+        )
+        assert quote.retail_per_gram == pytest.approx(quote.retail_per_10g / 10)
+
+    def test_summary_includes_per_10g_and_per_gram(self) -> None:
+        quote = build_india_gold_quote(4190.0, 95.19)
+        summary = format_india_gold_summary(quote)
+        assert "International parity:" in summary
+        assert "India retail estimate:" in summary
+        assert "/ 10g" in summary
+        assert "/ g" in summary
+        assert "10% import duty" in summary
+        assert f"{int(LOCAL_PREMIUM_RATE * 100)}% local premium" in summary
 
 
 class TestFormatting:

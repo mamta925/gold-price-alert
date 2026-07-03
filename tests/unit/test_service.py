@@ -42,7 +42,8 @@ class TestGoldAlertService:
         result = service.run()
         assert result.should_alert is False
         assert result.inr_line is not None
-        assert "India parity:" in result.inr_line
+        assert "International parity:" in result.inr_line
+        assert "India retail estimate:" in result.inr_line
 
     def test_no_breach_without_inr_when_rate_unavailable(self) -> None:
         fetch = _fetch_result(FetchMode.FULL, 252, end=3000.0)
@@ -63,7 +64,8 @@ class TestGoldAlertService:
         assert result.analysis.breach is not None
         assert result.analysis.breach.window_key == "1y"
         assert result.inr_line is not None
-        assert "India parity:" in result.inr_line
+        assert "International parity:" in result.inr_line
+        assert "India retail estimate:" in result.inr_line
 
     def test_breach_without_inr_still_alerts(self) -> None:
         fetch = _fetch_result(FetchMode.FULL, 252)
