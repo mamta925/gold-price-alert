@@ -108,7 +108,8 @@ class TestRunDailyJob:
         assert result.notifications[0].whatsapp_sent is True
         assert channels.count("email") == 1
         assert channels.count("whatsapp") == 1
-        assert "GOLD ALERT" in messages[-1].subject
+        assert "lowest in" in messages[-1].subject
+        assert "Gold Daily" in messages[-1].subject
 
     def test_no_breach_sends_daily_report(self) -> None:
         fetch = _fetch(FetchMode.FULL, 252)

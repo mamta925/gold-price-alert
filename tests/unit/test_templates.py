@@ -89,7 +89,7 @@ class TestWindowSpecificSubjects:
             timestamp=FIXED_TS,
         )
         assert msg.subject == (
-            f"🚨 GOLD ALERT: $1,945.20 — Lowest in the last {subject_phrase}"
+            f"🪙 Gold Daily: $1,945.20 — lowest in {subject_phrase}"
         )
 
 
@@ -106,8 +106,9 @@ class TestDailyAlertBody:
         )
         assert "Gold Daily Report (GC=F)" in msg.body
         assert "Today's close: $1,945.20" in msg.body
-        assert "Today is the lowest close in the last 1 year" in msg.body
-        assert "Previous low: $1,952.00 → Today: $1,945.20" in msg.body
+        assert "Today is at a trailing low of 1 year" in msg.body
+        assert "Price is lowest in the last 1 year." in msg.body
+        assert "Previous low:" not in msg.body
         assert "Timestamp: 2026-07-03 08:30:15 IST" in msg.body
         assert "Action: Evaluate current entry positions." in msg.body
 
@@ -200,9 +201,10 @@ class TestDailyAlertBody:
         )
         assert msg.body_html is not None
         assert GOLD_HEADER_IMAGE_SRC in msg.body_html
-        assert "India retail estimate" in msg.body_html
+        assert "India Retail Est." in msg.body_html
+        assert "Intl. Parity" in msg.body_html
         assert "~ ₹" in msg.body_html
-        assert "font-size:46px" in msg.body_html
+        assert "font-size:52px" in msg.body_html
 
     def test_render_price_alert_wrapper_still_works(self) -> None:
         closes = [
@@ -216,7 +218,7 @@ class TestDailyAlertBody:
             window_closes=closes,
         )
         assert msg.body_html is not None
-        assert "TRAILING LOW" in msg.body_html
+        assert "LOWEST IN 10 DAYS" in msg.body_html
 
 
 class TestHardFailureTemplate:
@@ -228,6 +230,9 @@ class TestHardFailureTemplate:
         assert f"Retries exhausted: {MAX_RETRIES} attempts with {RETRY_DELAY_SECONDS}s delay" in msg.body
         assert "Timestamp: 2026-07-03 08:30:15 IST" in msg.body
         assert "No low-detection was performed." in msg.body
+        assert msg.body_html is not None
+        assert "Critical Fetch Failure" in msg.body_html
+        assert CRITICAL_DATA_FETCH_ERROR in msg.body_html
 
 
 class TestFallbackTemplate:
@@ -239,6 +244,9 @@ class TestFallbackTemplate:
         assert "Mode: FALLBACK" in msg.body
         assert "Skipped windows: 1-Year" in msg.body
         assert "6-Month" not in msg.body.split("Skipped windows:")[1].split("\n")[0]
+        assert msg.body_html is not None
+        assert "Fallback Data Active" in msg.body_html
+        assert "FALLBACK" in msg.body_html
 
 
 class TestHelpers:
