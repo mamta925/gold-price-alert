@@ -16,12 +16,14 @@ Production hosting for the Gold Price Alert app. For local development, see [REA
 
 ```
 GitHub Actions (08:30 IST daily)
-    → POST https://your-app.snapdeploy.dev/run
+    → POST https://goldpricealert.containers.snapdeploy.dev/run
        Header: X-Cron-Secret: <CRON_SECRET>
     → SnapDeploy wakes container (~1 min cold start)
     → App runs once: fetch → analyze → email + WhatsApp
     → Container sleeps again
 ```
+
+**Live app URL:** `https://goldpricealert.containers.snapdeploy.dev`
 
 SnapDeploy has **no built-in cron**. GitHub Actions is the scheduler; SnapDeploy is the runtime.
 
@@ -44,7 +46,7 @@ Every successful run sends a **daily gold report** (email + WhatsApp). If gold i
 2. [SnapDeploy](https://snapdeploy.dev) → **New Container** → connect this repo (entry: `app.py`).
 3. Set env vars in SnapDeploy dashboard — see `.env.example` and `prd.md` Section 8.
 4. Add GitHub repository secrets (Settings → Secrets and variables → Actions → **Repository secrets**):
-   - `SNAPDEPLOY_APP_URL` — e.g. `https://your-app.snapdeploy.dev` (no trailing slash)
+   - `SNAPDEPLOY_APP_URL` — `https://goldpricealert.containers.snapdeploy.dev` (no trailing slash)
    - `CRON_SECRET` — **same value** as SnapDeploy `CRON_SECRET`
 5. Enable workflow: `.github/workflows/daily-alert.yml` (runs daily **08:30 IST**).
 
@@ -62,9 +64,9 @@ Copy `.env.example` for the full list. Required on SnapDeploy:
 | `TWILIO_WHATSAPP_FROM`, `TWILIO_WHATSAPP_TO` | Yes | Sandbox: recipient must `join <code>` first |
 | `CRON_SECRET` | Yes | You create this — not issued by SnapDeploy |
 
-Optional: `SMTP_HOST`, `SMTP_PORT`, `ALERT_EMAIL_FROM`, `LOG_LEVEL`, `PORT`.
+Optional: `SMTP_HOST`, `SMTP_PORT`, `ALERT_EMAIL_FROM`, `LOG_LEVEL`, `PORT` (default 5000).
 
-**Do not** add `zoneinfo`, `hmac`, or `pytest` to `requirements.txt` — they are stdlib or dev-only. Production deps are only the 5 lines in `requirements.txt`.
+**Build note:** the `Dockerfile` installs the runtime deps **directly** (not via `requirements.txt`), because SnapDeploy's build scanner otherwise injects stdlib `zoneinfo` and dev-only `pytest`, which break `pip`. Never add `zoneinfo`, `hmac`, or `pytest` as pip packages.
 
 Generate a strong `CRON_SECRET`:
 
@@ -80,18 +82,18 @@ Set the **same** value in SnapDeploy env vars and GitHub repository secret `CRON
 
 **GitHub Actions:** Actions → **Daily Gold Alert** → **Run workflow**
 
-**curl** (replace URL and secret):
+**curl** (replace secret):
 
 ```bash
 curl -sf -X POST \
   -H "X-Cron-Secret: YOUR_SECRET" \
-  https://your-app.snapdeploy.dev/run
+  https://goldpricealert.containers.snapdeploy.dev/run
 ```
 
 **Health check** (no auth):
 
 ```bash
-curl https://your-app.snapdeploy.dev/health
+curl https://goldpricealert.containers.snapdeploy.dev/health
 ```
 
 ---
@@ -131,10 +133,10 @@ First scheduled run happens at the next **08:30 IST** after secrets and deploy a
 First deploy can take **5–10 minutes**. If it stays stuck longer:
 
 1. Open SnapDeploy → **Logs** for this container. Look for `ModuleNotFoundError: gunicorn`, crash loops, or port errors.
-2. Ensure **`gunicorn`** is in `requirements.txt` and a **`Procfile`** exists (SnapDeploy runs Gunicorn, not Flask’s dev server).
+2. Ensure the `Dockerfile` installs **`gunicorn`** and runs it (SnapDeploy runs Gunicorn, not Flask’s dev server).
 3. Confirm **`GET /health`** returns 200 once the URL is live:
    ```bash
-   curl https://your-app.snapdeploy.dev/health
+   curl https://goldpricealert.containers.snapdeploy.dev/health
    ```
 4. In SnapDeploy container settings, set **`PORT=5000`** if auto-detection picked the wrong port.
 
@@ -142,7 +144,15 @@ After fixing, push to GitHub and **redeploy** (or cancel the stuck deploy and st
 
 ### Build failed: `No matching distribution found for zoneinfo`
 
-SnapDeploy **Smart Build** may inject stdlib modules (`zoneinfo`, `hmac`) or `pytest` into requirements. Do **not** use Smart Build auto-fix. Redeploy from the repo’s 5-line `requirements.txt` on `master`.
+SnapDeploy **Smart Build** injects stdlib modules (`zoneinfo`, `hmac`) or `pytest` into the requirements it installs. Do **not** use Smart Build auto-fix. The `Dockerfile` avoids this by installing runtime deps directly instead of from `requirements.txt` — keep it that way.
+
+### Deploy blocked demanding a PostgreSQL add-on
+
+SnapDeploy's keyword scanner flags any occurrence of a database name in the repo. This app uses **no database** — do not create PostgreSQL. Ensure no file contains database keywords like "PostgreSQL" (a Spec Kit template example previously triggered this).
+
+### Port mismatch / `EXPOSE` warning
+
+Keep everything on **5000**: `Dockerfile` `EXPOSE 5000`, gunicorn bind `5000`, and Container Port `5000` in the dashboard.
 
 ### Workflow fails: `Missing SNAPDEPLOY_APP_URL or CRON_SECRET`
 
