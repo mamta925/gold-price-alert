@@ -40,6 +40,34 @@ Every successful run sends a **daily gold report** (email + WhatsApp). If gold i
 
 ---
 
+## Adding / changing recipients
+
+Recipients are controlled by **SnapDeploy environment variables** — no code change needed. After editing, **redeploy/restart** the container so the new values load.
+
+### Add an email recipient
+
+1. SnapDeploy → container → **Environment variables** → edit **`ALERT_EMAIL_TO`**
+2. Add addresses **comma-separated, no spaces**:
+   ```
+   ALERT_EMAIL_TO=mamtarajput925@gmail.com,ptiwari248@gmail.com,newperson@gmail.com
+   ```
+3. Save and redeploy. All listed addresses receive every alert.
+
+### Add a WhatsApp recipient
+
+WhatsApp uses the **Twilio sandbox**, so a new number needs **two steps**:
+
+1. **Join the sandbox from the new phone.** On that phone's WhatsApp, send `join <your-sandbox-code>` to **+1 415 523 8886**. Get the code from Twilio Console → **Messaging → Try it out → Send a WhatsApp message**. Wait for "✅ You are all set!"
+2. SnapDeploy → **Environment variables** → set **`TWILIO_WHATSAPP_TO`** with the `whatsapp:` prefix:
+   ```
+   TWILIO_WHATSAPP_TO=whatsapp:+919672338162
+   ```
+3. Save and redeploy.
+
+**Note:** the sandbox delivers to **one** `TWILIO_WHATSAPP_TO` number, and each recipient must join the sandbox first. Sandbox joins expire after **72 hours** of inactivity — resend `join <code>` if messages stop. To send to multiple numbers or skip the join step, upgrade to a Twilio **paid WhatsApp sender** (out of scope for the free sandbox).
+
+---
+
 ## Setup checklist
 
 1. Push code to GitHub.
