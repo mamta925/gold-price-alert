@@ -22,7 +22,7 @@
 
 **Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]
 
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+**Storage**: [if applicable, e.g., relational DB, key-value store, files or N/A]
 
 **Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]
 
