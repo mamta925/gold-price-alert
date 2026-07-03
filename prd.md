@@ -34,7 +34,7 @@ Track the daily closing price of Gold and automatically notify the user when **t
 - Window-specific message templates (e.g. *"Today is the lowest in the last 1 year"*)
 - Retry logic, logging, secure credential handling
 - **Failure email** on hard fetch failure (`CRITICAL_DATA_FETCH_ERROR`)
-- **Fallback mode:** if API returns 10–364 trading days, analyze available recent days and **Email** a degraded-data warning
+- **Fallback mode:** if API returns 10–251 trading days, analyze available recent days and **Email** a degraded-data warning
 - Cron-compatible single-run script (run once, exit)
 
 ### Out of Scope
@@ -55,19 +55,19 @@ Track the daily closing price of Gold and automatically notify the user when **t
 | ID | Requirement |
 |---|---|
 | **FR-01** | Track **Gold Futures** ticker `GC=F` on Yahoo Finance as the sole pricing source. |
-| **FR-02** | Fetch enough history to populate a **365 trading-day** window on each run. |
-| **FR-03** | Execute **once per day in the morning (IST)** — recommended **08:30 IST** (`30 8 * * *` with `TZ=Asia/Kolkata`). |
-| **FR-04** | Windows are built from **trading days** (rows with valid close prices). Weekends/holidays are skipped implicitly via available close data. |
-| **FR-05** | **Primary target:** fetch **365 trading days**. If the API returns **fewer than 365 but ≥10** trading days after retries → enter **fallback mode** (Section 3.1.1): use available recent days, skip windows that exceed available history, and send an **Email** degraded-data alert. |
+| **FR-02** | Fetch **~1 calendar year** of daily closes using `period="1y"` (yfinance returns **~252 trading rows** for GC=F). This matches the 1-Year window (N=252). Do **not** require 365 rows — markets have ~252 trading days per calendar year. |
+| **FR-03** | Execute **once per day in the morning (IST)** — **08:30 IST** (`30 8 * * *` with `TZ=Asia/Kolkata`). GC=F settles ~02:30–03:30 IST; 08:30 IST ensures data is available. |
+| **FR-04** | Windows are built from **trading days only** (rows with valid close prices). Weekends and exchange holidays are excluded implicitly — each row is one session close. |
+| **FR-05** | **Primary target:** receive **≥252 trading days** (full mode). If the API returns **10–251 trading days** after retries → **fallback mode** (Section 3.1.1): use available recent days, skip windows that exceed available history, and send an **Email** degraded-data alert. |
 | **FR-05a** | If the API returns **zero data** or **fewer than 10** trading days after retries → **hard failure**: log `CRITICAL_DATA_FETCH_ERROR`, send **Email** alert (Section 5.3), exit without low-detection. |
 
 #### 3.1.1 Fallback Mode (Partial / Degraded Data)
 
-When Yahoo Finance returns incomplete history (<365 trading days) but enough recent days to evaluate at least the **10-day** window:
+When Yahoo Finance returns incomplete history (<252 trading days) but enough recent days to evaluate at least the **10-day** window:
 
 | Step | Behavior |
 |---|---|
-| 1 | Log `DATA_FETCH_DEGRADED` with count of trading days received (e.g. `received=180, expected=365`). |
+| 1 | Log `DATA_FETCH_DEGRADED` with count of trading days received (e.g. `received=180, expected=252`). |
 | 2 | Send **Email-only** fallback alert (Section 5.4) — informs user that analysis runs on available recent days only. |
 | 3 | Proceed with low-detection using **only the recent days returned**. |
 | 4 | Evaluate windows **top-down** from the longest eligible horizon; **stop at the first trigger** (Section 3.2). |
@@ -76,6 +76,8 @@ When Yahoo Finance returns incomplete history (<365 trading days) but enough rec
 **Minimum data to run fallback:** **10 trading days** (shortest window). Below that → hard failure (FR-05a).
 
 ### 3.2 Low-Detection Logic
+
+> **Design note — Trading days vs calendar days:** A "1-year" lookback in financial markets is **~252 trading sessions**, not 365 calendar days. Using N=365 would cause yfinance's `period="1y"` (~252 rows) to always miss the threshold and trigger fallback mode daily. Window sizes below use **standard US market trading-day equivalents** for each labeled horizon.
 
 For each run, let:
 
@@ -90,20 +92,20 @@ P_current <= min(Window(N))
 
 In plain language: **if today's close is the lowest (or tied for lowest) in the last N trading days, that window triggers.**
 
-| Evaluation Order | Window Label | N (Trading Days) | Message Key |
-|---|---|---|---|
-| 1 | 1-Year | 365 | `1y` |
-| 2 | 6-Month | 180 | `6m` |
-| 3 | 3-Month | 90 | `3m` |
-| 4 | 1-Month | 30 | `1m` |
-| 5 | 15-Day | 15 | `15d` |
-| 6 | 10-Day | 10 | `10d` |
+| Evaluation Order | Window Label | N (Trading Days) | ~Calendar Equivalent | Message Key |
+|---|---|---|---|---|
+| 1 | 1-Year | **252** | ~1 calendar year | `1y` |
+| 2 | 6-Month | **126** | ~6 calendar months | `6m` |
+| 3 | 3-Month | **63** | ~3 calendar months | `3m` |
+| 4 | 1-Month | **21** | ~1 calendar month | `1m` |
+| 5 | 15-Day | **15** | ~3 calendar weeks | `15d` |
+| 6 | 10-Day | **10** | ~2 calendar weeks | `10d` |
 
 **Top-down short-circuit rules:**
 
 | ID | Requirement |
 |---|---|
-| **FR-06** | Evaluate windows in **top-down order**: 365 → 180 → 90 → 30 → 15 → 10. Skip windows where `N > available_trading_days` (fallback mode). |
+| **FR-06** | Evaluate windows in **top-down order**: 252 → 126 → 63 → 21 → 15 → 10. Skip windows where `N > available_trading_days` (fallback mode). |
 | **FR-07** | **Short-circuit:** as soon as the **first (longest eligible) window** triggers, **stop** — do **not** evaluate or alert on any lower/shorter windows. |
 | **FR-08** | If **no** window triggers after full top-down pass → log locally and **exit silently** (no user notification). |
 | **FR-09** | If a window triggers → send **exactly one** alert using **that window's specific template** (Section 5.1). Never bundle multiple windows in one message. |
@@ -128,7 +130,7 @@ In plain language: **if today's close is the lowest (or tied for lowest) in the 
 
 | ID | Requirement |
 |---|---|
-| **NFR-01** | **Data fetch resilience:** Retry up to **3 times** with **60-second** delay. After retries: (a) **≥365 days** → full run; (b) **10–364 days** → fallback mode (Section 3.1.1) + Email alert; (c) **<10 days or empty** → hard failure: log `CRITICAL_DATA_FETCH_ERROR`, Email alert, exit. |
+| **NFR-01** | **Data fetch resilience:** Retry up to **3 times** with **60-second** delay. After retries: (a) **≥252 trading days** → full run; (b) **10–251 trading days** → fallback mode (Section 3.1.1) + Email alert; (c) **<10 days or empty** → hard failure: log `CRITICAL_DATA_FETCH_ERROR`, Email alert, exit. |
 | **NFR-02** | **Security:** No plaintext credentials in source code. All secrets via environment variables or `.env` (gitignored). |
 | **NFR-03** | **Logging:** Write structured logs on every run (fetch status, windows evaluated top-down, alerts sent/skipped, failures). |
 | **NFR-04** | **Daily re-alerts:** Same lows triggering on consecutive days must alert again each day. |
@@ -207,7 +209,7 @@ No low-detection was performed. Investigate Yahoo Finance connectivity or ticker
 
 ### 5.4 Fallback / Degraded Data Template (Email Only)
 
-Sent via **Email** when the API returns **partial data** (10–364 trading days). Low-detection still runs on available recent days.
+Sent via **Email** when the API returns **partial data** (10–251 trading days). Low-detection still runs on available recent days.
 
 **Subject:**
 
@@ -220,7 +222,7 @@ Sent via **Email** when the API returns **partial data** (10–364 trading days)
 ```
 Yahoo Finance returned incomplete history for GC=F.
 
-Expected: 365 trading days
+Expected: 252 trading days (~1 calendar year)
 Received: <count> trading days
 Mode: FALLBACK — using available recent days only
 Skipped windows: <comma-separated list of windows not evaluated, e.g. 1-Year>
@@ -232,7 +234,7 @@ Low-detection will proceed top-down for eligible windows (first match wins). A s
 **Price alert addendum** (append to Section 5.1 body when fallback was used):
 
 ```
-⚠️ Note: This alert used fallback data (<count> trading days available, not full 365-day history).
+⚠️ Note: This alert used fallback data (<count> trading days available, not full 252-day / 1-year history).
 ```
 
 ---
@@ -242,22 +244,22 @@ Low-detection will proceed top-down for eligible windows (first match wins). A s
 ```
 [Yahoo Finance / yfinance]
          │
-         │  Pull daily closes (GC=F), 3 retries
+         │  period="1y" → ~252 trading-day closes (GC=F), 3 retries
          ▼
-[Python Cron Script — morning IST]
+[Python Cron Script — 08:30 IST]
          │
          ├── <10 days or empty ──► CRITICAL_DATA_FETCH_ERROR
          │                          └── Email (hard failure template) → exit
          │
-         ├── 10–364 days ──► FALLBACK MODE
+         ├── 10–251 days ──► FALLBACK MODE
          │                    ├── Email (degraded-data template)
          │                    └── Top-down short-circuit on eligible windows only
          │
-         └── ≥365 days ──► FULL MODE
+         └── ≥252 days ──► FULL MODE
                               └── Top-down short-circuit:
-                                  365 → if trigger → alert & STOP
-                                  else 180 → if trigger → alert & STOP
-                                  else 90 → … → 10
+                                  252 (1Y) → if trigger → alert & STOP
+                                  else 126 (6M) → if trigger → alert & STOP
+                                  else 63 (3M) → … → 10
                                        │
                                        ▼
                                  [Any trigger?]
@@ -277,7 +279,7 @@ Low-detection will proceed top-down for eligible windows (first match wins). A s
 | Layer | Choice |
 |---|---|
 | Language | Python 3.10+ |
-| Market data | `yfinance` |
+| Market data | `yfinance` — `Ticker("GC=F").history(period="1y")` (~252 rows) |
 | Data processing | `pandas` |
 | Email | `smtplib` + Gmail SMTP (`smtp.gmail.com:465`, SSL) |
 | WhatsApp | Twilio WhatsApp API (**required v1**) |
@@ -331,8 +333,8 @@ gold-price-alert/
 
 ## 9. Acceptance Criteria
 
-- [ ] **AC-01:** Fetches `GC=F` daily closes via `yfinance`; targets 365 trading days; accepts 10–364 for fallback mode.
-- [ ] **AC-02:** Windows evaluated **top-down**: 365 → 180 → 90 → 30 → 15 → 10.
+- [ ] **AC-01:** Fetches `GC=F` via `yfinance` with `period="1y"`; full mode when **≥252** trading rows; fallback when **10–251**.
+- [ ] **AC-02:** Windows evaluated **top-down**: 252 → 126 → 63 → 21 → 15 → 10 (standard trading-day horizons).
 - [ ] **AC-03:** Window triggers when today's close is the lowest in the last N **trading days** (inclusive).
 - [ ] **AC-04:** Zero triggers → log and exit silently (no Email/WhatsApp).
 - [ ] **AC-05:** Only **one window** may trigger per run — first match top-down; send **one** window-specific message (not a bundle).
@@ -340,7 +342,7 @@ gold-price-alert/
 - [ ] **AC-06:** Every price alert sent via **both Email and WhatsApp**.
 - [ ] **AC-07:** Same condition on consecutive days → alert sent again (no dedupe).
 - [ ] **AC-08:** Hard failure (<10 days or empty after retries) → log `CRITICAL_DATA_FETCH_ERROR` + **Email** hard-failure alert; no low-detection.
-- [ ] **AC-09:** Partial data (10–364 trading days) → **Email** fallback alert + low-detection on eligible windows only (skip windows where N > available days).
+- [ ] **AC-09:** Partial data (10–251 trading days) → **Email** fallback alert + low-detection on eligible windows only (skip windows where N > available days).
 - [ ] **AC-09a:** Fallback price alerts include degraded-data note; still sent via Email + WhatsApp if windows trigger.
 - [ ] **AC-10:** Cron documented for **morning IST** (`30 8 * * *`, `TZ=Asia/Kolkata`).
 - [ ] **AC-11:** No secrets in git; `.env.example` lists all required vars.
@@ -352,7 +354,7 @@ gold-price-alert/
 
 1. **Scaffold** — `requirements.txt`, `src/` layout, `config.py`, `.env.example`
 2. **Templates** — `templates.py` with six window templates + failure template
-3. **Fetcher** — `fetcher.py` with retry, full/fallback/hard-fail routing
+3. **Fetcher** — `fetcher.py` with `period="1y"`, retry, full (≥252) / fallback (10–251) / hard-fail routing
 4. **Analyzer** — `analyzer.py` top-down short-circuit; returns at most one breach
 5. **Notifier** — `notifier.py` Email + WhatsApp for price and failure alerts
 6. **Main** — `main.py` orchestration, IST timestamps, logging
@@ -367,14 +369,15 @@ gold-price-alert/
 | # | Decision |
 |---|---|
 | **D1** | **Email + WhatsApp both required** for v1 (no optional channel flag). |
-| **D2** | Trigger = today's close is the **lowest in the last N trading days** (10, 15, 30, 90, 180, 365). |
-| **D3** | Evaluation is **top-down with short-circuit**: 365 → 180 → 90 → 30 → 15 → 10; **stop at first trigger**. |
+| **D2** | Trigger = today's close is the **lowest in the last N trading days** — N values: **252, 126, 63, 21, 15, 10** (not calendar-day counts). |
+| **D3** | Evaluation is **top-down with short-circuit**: 252 → 126 → 63 → 21 → 15 → 10; **stop at first trigger**. |
 | **D4** | Send **one specific alert** for the matched window only (e.g. *"Today is the lowest in the last 1 year"*). Do not alert on lower windows when a higher window already triggered. |
 | **D5** | Cron runs **morning IST** (recommended 08:30 IST). |
 | **D6** | **Alert every day** the condition holds — no deduplication. |
 | **D7** | On **hard failure** (<10 days or empty API) → log `CRITICAL_DATA_FETCH_ERROR` + **Email** alert; no analysis. |
-| **D8** | On **partial data** (10–364 trading days) → **fallback to available recent days**, **Email** degraded alert, run eligible windows only (skip longer horizons). |
+| **D8** | On **partial data** (10–251 trading days) → **fallback to available recent days**, **Email** degraded alert, run eligible windows only (skip longer horizons). |
 | **D9** | Price alerts (when windows trigger) → still **Email + WhatsApp**; include fallback note if degraded data was used. |
+| **D10** | **Option A adopted:** window N values use **standard market trading days** (~252/year), not calendar days. Fetch `period="1y"` — do not require 365 rows. |
 
 ---
 
@@ -382,10 +385,12 @@ gold-price-alert/
 
 | Term | Definition |
 |---|---|
+| **Trading day** | One exchange session with a valid close price; ~252 per calendar year for US markets |
 | **Trailing window** | Last N **trading days** of closing prices, including today |
 | **Trigger / breach** | `P_current <= min(Window(N))` — today is at or below the window low |
-| **Top-down short-circuit** | Check longest window first; on first trigger, alert and stop — do not evaluate shorter windows |
+| **Top-down short-circuit** | Check longest window first (252-day / 1-year); on first trigger, alert and stop |
 | **Previous min** | Minimum close in the window **excluding** today |
 | **Headless** | No UI; cron-invoked CLI script only |
-| **Fallback mode** | Partial API data (10–364 days): analyze recent days, skip ineligible windows, Email warning |
+| **Fallback mode** | Partial API data (10–251 days): analyze recent days, skip ineligible windows, Email warning |
 | **Hard failure** | Empty or <10 days after retries: no analysis, Email critical alert |
+| **Full mode** | ≥252 trading days received — all six windows eligible |
