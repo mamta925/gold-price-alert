@@ -38,7 +38,7 @@ Track the daily closing price of Gold and send a **daily gold report** every suc
 - **Failure email** on hard fetch failure (`CRITICAL_DATA_FETCH_ERROR`)
 - **Fallback mode:** if API returns 10–251 trading days, analyze available recent days and **Email** a degraded-data warning
 - Cron-compatible single-run script (run once, exit)
-- **SnapDeploy** deployment: GitHub-connected container, auto-sleep/wake, daily scheduled trigger
+- **SnapDeploy** deployment: GitHub-connected container built from a `Dockerfile` (gunicorn :5000), auto-sleep/wake, daily scheduled trigger (wake `/health` → `POST /run`)
 - **India display pricing:** USD `GC=F` for detection; **INR per 10g parity** plus **indicative retail estimate** (parity + 10% import duty + 4% local premium) via `GC=F` + `INR=X` (no MCX ticker, no paid APIs)
 - **Email assets:** `assets/gold-header.png` embedded via CID inline attachment (Gmail-compatible)
 
@@ -73,14 +73,14 @@ Track the daily closing price of Gold and send a **daily gold report** every suc
 
 | ID | Requirement |
 |---|---|
-| **FR-19** | **Host on SnapDeploy** (free tier): connect this GitHub repo; SnapDeploy auto-builds the Python container (no manual Dockerfile required unless needed). |
+| **FR-19** | **Host on SnapDeploy** (free tier) via a committed **`Dockerfile`** (`python:3.12-slim` + `gunicorn`). The Dockerfile installs runtime deps **directly** (not from `requirements.txt`) because SnapDeploy's build scanner otherwise injects stdlib `zoneinfo` and dev-only `pytest`, breaking `pip`. Served by **gunicorn** on **port 5000** (`app:app`). |
 | **FR-20** | Container spec: **512 MB RAM / 0.25 vCPU** is sufficient; script runs once daily (~seconds of CPU). |
-| **FR-21** | **Auto-sleep / auto-wake:** container sleeps when idle; wakes on incoming HTTP (~60s cold start acceptable before 08:30 IST run). |
-| **FR-22** | Expose a **protected HTTP trigger** (e.g. `POST /run` with `CRON_SECRET` header or query param) that invokes the alert pipeline once and returns JSON status. No public UI beyond health + run endpoints. |
-| **FR-23** | **Daily schedule at 08:30 IST** via **GitHub Actions** cron workflow (SnapDeploy has no built-in cron): workflow sends one authenticated HTTP request to the SnapDeploy app URL → wakes container → runs job → container sleeps again. |
-| **FR-24** | **Free-tier budget:** 1 wake/run per day (well within SnapDeploy's **10 deploys/wake-ups per day** limit). |
-| **FR-25** | Store all secrets (SMTP, Twilio, `CRON_SECRET`) in **SnapDeploy environment variables** dashboard — not in git. |
-| **FR-26** | Optional: `GET /health` for SnapDeploy health checks and manual smoke tests. |
+| **FR-21** | **Auto-sleep / auto-wake:** container sleeps when idle. The first HTTP request returns SnapDeploy's **503 "waking up" page** (~60–90s cold start); the caller must **poll `GET /health` until 200** before triggering the run. |
+| **FR-22** | Expose a **protected HTTP trigger** — `POST /run` with `CRON_SECRET` via `X-Cron-Secret` header or `?secret=` query param — that invokes the alert pipeline once and returns JSON status. No public UI beyond health + run endpoints. |
+| **FR-23** | **Daily schedule at 08:30 IST** via **GitHub Actions** cron workflow (SnapDeploy has no built-in cron): the workflow **wakes the container (polls `/health` until 200), then sends one authenticated `POST /run`**, prints HTTP status + body, and fails on non-2xx. Container sleeps again after idle. |
+| **FR-24** | **Free-tier budget:** 1 wake/run per day (well within SnapDeploy's daily wake-up limit). |
+| **FR-25** | Store all secrets (SMTP, Twilio, `CRON_SECRET`) in **SnapDeploy environment variables**; the GitHub Actions workflow uses repository secrets `SNAPDEPLOY_APP_URL` + `CRON_SECRET` (same value as SnapDeploy). Never in git. |
+| **FR-26** | `GET /health` returns `200 {"status":"ok"}` for SnapDeploy health checks, cold-start wake polling, and manual smoke tests. |
 
 #### 3.1.1 Fallback Mode (Partial / Degraded Data)
 
@@ -344,9 +344,10 @@ The daily gold report follows with today's price and window scan.
 ```
 [GitHub Actions — 08:30 IST cron]
          │
-         │  POST /run (CRON_SECRET) → SnapDeploy URL
+         │  1) poll GET /health until 200 (wake, ~60-90s cold start)
+         │  2) POST /run (X-Cron-Secret: CRON_SECRET) → SnapDeploy URL
          ▼
-[SnapDeploy Container — auto-wake → run → auto-sleep]
+[SnapDeploy Container — gunicorn :5000 — auto-wake → run → auto-sleep]
          │
          │  Fetch GC=F (yfinance, 3 retries)
          ▼
@@ -378,8 +379,8 @@ The daily gold report follows with today's price and window scan.
 | Data processing | `pandas` |
 | Email | `smtplib` + Gmail SMTP — multipart HTML with CID inline image |
 | WhatsApp | Twilio WhatsApp API (**required v1**) |
-| Scheduling | GitHub Actions cron → HTTP wake of SnapDeploy container (08:30 IST) |
-| Hosting | [SnapDeploy](https://snapdeploy.dev) free tier — GitHub deploy, auto-sleep/wake, no credit card |
+| Scheduling | GitHub Actions cron → poll `/health` to wake → `POST /run` (08:30 IST) |
+| Hosting | [SnapDeploy](https://snapdeploy.dev) free tier — Dockerfile build, gunicorn :5000, auto-sleep/wake, no credit card |
 | Config | SnapDeploy env vars + `python-dotenv` for local dev |
 
 ---
@@ -396,9 +397,11 @@ gold-price-alert/
 ├── assets/
 │   └── gold-header.png       # Email header (CID inline attachment)
 ├── app.py                # SnapDeploy entry: /health + protected /run → main.py
+├── Dockerfile            # python:3.12-slim + gunicorn :5000; installs deps directly
+├── Procfile              # gunicorn start command (backup for buildpack path)
 ├── .github/
 │   └── workflows/
-│       └── daily-alert.yml   # 08:30 IST cron → POST SnapDeploy /run
+│       └── daily-alert.yml   # 08:30 IST cron → wake /health → POST SnapDeploy /run
 ├── src/
 │   ├── __init__.py
 │   ├── main.py           # Entry: fetch → evaluate → daily report → notify
@@ -476,8 +479,8 @@ gold-price-alert/
 7. **Main** — `main.py` orchestration, IST timestamps, logging
 8. **Tests** — analyzer ordering + template rendering + notifier CID
 9. **Docs** — README with SnapDeploy setup + GitHub Actions schedule
-10. **Deploy** — `app.py` HTTP trigger, SnapDeploy connect, GHA workflow secrets
-11. **Dry run** — manual `curl /run` against SnapDeploy URL; verify daily report on normal days and failure paths
+10. **Deploy** — `Dockerfile` (gunicorn :5000) + `app.py` HTTP trigger, SnapDeploy connect, GHA workflow secrets (`SNAPDEPLOY_APP_URL`, `CRON_SECRET`)
+11. **Dry run** — GHA **Run workflow** (or manual `curl` wake `/health` then `POST /run`); verify daily report on normal days and failure paths
 
 ---
 
@@ -495,7 +498,7 @@ gold-price-alert/
 | **D8** | On **partial data** (10–251 trading days) → **fallback to available recent days**, **Email** degraded alert, run eligible windows only (skip longer horizons). |
 | **D9** | Daily gold reports on successful fetch → **Email + WhatsApp**; include fallback note if degraded data was used. |
 | **D10** | **Option A adopted:** window N values use **standard market trading days** (~252/year), not calendar days. Fetch `period="1y"` — do not require 365 rows. |
-| **D11** | **SnapDeploy** is the v1 hosting platform: GitHub-connected container, free tier, auto-sleep/wake. Daily **08:30 IST** trigger via **GitHub Actions** → HTTP `/run`. No VPS/cron server management. |
+| **D11** | **SnapDeploy** is the v1 hosting platform: GitHub-connected container built from a **`Dockerfile`** (gunicorn on **port 5000**), free tier, auto-sleep/wake. Daily **08:30 IST** trigger via **GitHub Actions** → **wake `/health` then `POST /run`**. No VPS/cron server management. |
 | **D12** | **India pricing (Option 1):** Detection **100% on `GC=F` USD** trailing lows. Alert text adds **`IndiaGoldQuote`**: INR/10g **parity** + **retail estimate** (parity × 1.10 duty × 1.04 premium) via `GC=F` + `INR=X` + `src/pricing.py`. No MCX, no paid metal APIs. INR failure → USD-only report. |
 | **D13** | **Daily HTML email:** All user-facing emails (daily report, hard failure, fallback) use shared dark/gold HTML shell; daily report embeds `assets/gold-header.png` via CID. WhatsApp receives plain text only. |
 
@@ -514,7 +517,7 @@ gold-price-alert/
 | **Last 5 trading days** | Summary row at bottom of window scan — min close across last 5 sessions vs today |
 | **Previous min** | Minimum close in the window **excluding** today |
 | **Headless** | No UI; daily job triggered via protected HTTP endpoint (not interactive) |
-| **SnapDeploy** | Container host — GitHub deploy, auto-sleep when idle, wakes on HTTP traffic |
+| **SnapDeploy** | Container host — Dockerfile build (gunicorn :5000), GitHub deploy, auto-sleep when idle, wakes on HTTP traffic |
 | **Fallback mode** | Partial API data (10–251 days): analyze recent days, skip ineligible windows, Email warning |
 | **Hard failure** | Empty or <10 days after retries: no analysis, Email critical alert |
 | **Full mode** | ≥252 trading days received — all six windows eligible |
