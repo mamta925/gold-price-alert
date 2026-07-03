@@ -4,12 +4,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from src.analyzer import WINDOWS_TOP_DOWN
+from src.analyzer import WINDOWS_TOP_DOWN, min_close_day
 from src.models import (
     CRITICAL_DATA_FETCH_ERROR,
     EXPECTED_TRADING_DAYS,
     MAX_RETRIES,
     RETRY_DELAY_SECONDS,
+    TradingDayClose,
     WindowBreach,
 )
 from src.pricing import format_usd
@@ -48,12 +49,32 @@ def skipped_window_labels(trading_days: int) -> list[str]:
     ]
 
 
+def format_window_context_lines(
+    breach: WindowBreach,
+    window_closes: list[TradingDayClose],
+    *,
+    recent_days: int = 5,
+) -> list[str]:
+    min_day = min_close_day(window_closes)
+    show_days = min(recent_days, len(window_closes))
+    lines = [
+        "",
+        f"Window context ({breach.horizon_label}, {breach.n} trading days):",
+        f"Window low: {format_usd(min_day.close)} on {min_day.date}",
+        f"Last {show_days} trading days:",
+    ]
+    for day in window_closes[-show_days:]:
+        lines.append(f"  {day.date}: {format_usd(day.close)}")
+    return lines
+
+
 def render_price_alert(
     breach: WindowBreach,
     *,
     inr_line: str | None,
     timestamp: datetime,
     fallback_trading_days: int | None = None,
+    window_closes: list[TradingDayClose] | None = None,
 ) -> AlertMessage:
     current_usd = format_usd(breach.current)
     subject = (
@@ -67,6 +88,8 @@ def render_price_alert(
         f"📉 Today is the lowest Gold close (GC=F) in the last **{breach.horizon_label}**.",
         f"Previous low: {format_usd(breach.previous_min)} → Today: {current_usd}",
     ]
+    if window_closes is not None:
+        body_lines.extend(format_window_context_lines(breach, window_closes))
     if inr_line is not None:
         body_lines.append(inr_line)
     body_lines.extend(

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -8,10 +8,12 @@ from src.models import (
     EXPECTED_TRADING_DAYS,
     MAX_RETRIES,
     RETRY_DELAY_SECONDS,
+    TradingDayClose,
     WindowBreach,
 )
 from src.templates import (
     format_timestamp_ist,
+    format_window_context_lines,
     render_fallback_alert,
     render_hard_failure_alert,
     render_price_alert,
@@ -114,6 +116,33 @@ class TestPriceAlertBody:
             fallback_trading_days=None,
         )
         assert "fallback data" not in msg.body
+
+    def test_body_includes_window_context_when_closes_provided(self) -> None:
+        closes = [
+            TradingDayClose(date=date(2026, 6, 24), close=3990.30),
+            TradingDayClose(date=date(2026, 6, 26), close=4078.70),
+            TradingDayClose(date=date(2026, 6, 29), close=4022.30),
+            TradingDayClose(date=date(2026, 6, 30), close=4022.90),
+            TradingDayClose(date=date(2026, 7, 1), close=4068.30),
+            TradingDayClose(date=date(2026, 7, 2), close=4195.80),
+        ]
+        breach = WindowBreach(
+            window_key="10d",
+            horizon_label="10 days",
+            n=10,
+            current=4195.80,
+            previous_min=4022.30,
+        )
+        msg = render_price_alert(
+            breach,
+            inr_line=None,
+            timestamp=FIXED_TS,
+            window_closes=closes,
+        )
+        assert "Window context (10 days, 10 trading days):" in msg.body
+        assert "Window low: $3,990.30 on 2026-06-24" in msg.body
+        assert "Last 5 trading days:" in msg.body
+        assert "2026-07-02: $4,195.80" in msg.body
 
 
 class TestHardFailureTemplate:
