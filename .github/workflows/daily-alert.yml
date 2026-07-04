@@ -26,7 +26,8 @@ jobs:
           echo "Waking container via GET $base/health ..."
           awake=0
           for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "$base/health" || echo 000)
+            # -L follows SnapDeploy's http->https (308) redirect so we reach the app.
+            code=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 30 "$base/health" || echo 000)
             echo "  health attempt $i -> HTTP $code"
             if [ "$code" = "200" ]; then
               awake=1
@@ -36,12 +37,15 @@ jobs:
             sleep 10
           done
           if [ "$awake" -ne 1 ]; then
-            echo "Container did not wake within timeout."
+            echo "Container did not wake within timeout (last HTTP $code)."
             exit 1
           fi
 
           echo "Triggering POST $base/run ..."
-          code=$(curl -s -o /tmp/run_body.txt -w "%{http_code}" --max-time 180 \
+          # -L follows redirects; --post301/302/303 keep it a POST (not downgraded to GET)
+          # if SNAPDEPLOY_APP_URL is http:// and the edge redirects to https://.
+          code=$(curl -sL --post301 --post302 --post303 \
+            -o /tmp/run_body.txt -w "%{http_code}" --max-time 180 \
             -X POST -H "X-Cron-Secret: ${CRON_SECRET}" "$base/run")
           echo "POST /run -> HTTP $code"
           echo "--- response body ---"
