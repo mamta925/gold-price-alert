@@ -21,38 +21,48 @@ jobs:
           fi
           base="${SNAPDEPLOY_APP_URL%/}"
 
-          # SnapDeploy auto-sleeps the container; the first request returns a 503
-          # "waking up" page. Poll /health until the app itself answers 200.
-          echo "Waking container via GET $base/health ..."
-          awake=0
-          for i in $(seq 1 30); do
-            # -L follows SnapDeploy's http->https (308) redirect so we reach the app.
-            code=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 30 "$base/health" || echo 000)
-            echo "  health attempt $i -> HTTP $code"
-            if [ "$code" = "200" ]; then
-              awake=1
-              echo "Container is awake."
-              break
-            fi
+          # SnapDeploy auto-sleeps the container and serves a 503 "Waking up your
+          # container..." page until it is ready. /health can briefly report 200 at
+          # the edge while POST /run still hits the wake page, so we retry the POST
+          # itself and treat the wake page as "still waking" rather than a failure.
+          echo "Warming container via GET $base/health ..."
+          for i in $(seq 1 20); do
+            hc=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 30 "$base/health" || echo 000)
+            echo "  health attempt $i -> HTTP $hc"
+            [ "$hc" = "200" ] && break
             sleep 10
           done
-          if [ "$awake" -ne 1 ]; then
-            echo "Container did not wake within timeout (last HTTP $code)."
-            exit 1
-          fi
 
           echo "Triggering POST $base/run ..."
-          # -L follows redirects; --post301/302/303 keep it a POST (not downgraded to GET)
-          # if SNAPDEPLOY_APP_URL is http:// and the edge redirects to https://.
-          code=$(curl -sL --post301 --post302 --post303 \
-            -o /tmp/run_body.txt -w "%{http_code}" --max-time 180 \
-            -X POST -H "X-Cron-Secret: ${CRON_SECRET}" "$base/run")
-          echo "POST /run -> HTTP $code"
+          run_ok=0
+          for i in $(seq 1 20); do
+            # -L follows http->https redirect; --post30x keeps the method a POST.
+            code=$(curl -sL --post301 --post302 --post303 \
+              -o /tmp/run_body.txt -w "%{http_code}" --max-time 180 \
+              -X POST -H "X-Cron-Secret: ${CRON_SECRET}" "$base/run")
+            if grep -qi "Waking up your container\|Container is Sleeping" /tmp/run_body.txt 2>/dev/null; then
+              echo "  run attempt $i -> HTTP $code (container still waking, retrying in 15s)"
+              sleep 15
+              continue
+            fi
+            echo "  run attempt $i -> HTTP $code"
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
+              run_ok=1
+              break
+            fi
+            # A real (non-wake-page) error from the app — stop and surface it.
+            echo "--- response body ---"
+            cat /tmp/run_body.txt || true
+            echo ""
+            echo "Run endpoint returned non-2xx status $code"
+            exit 1
+          done
+
+          if [ "$run_ok" -ne 1 ]; then
+            echo "Container did not become ready for POST /run within timeout."
+            exit 1
+          fi
           echo "--- response body ---"
           cat /tmp/run_body.txt || true
           echo ""
-          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
-            echo "Run endpoint returned non-2xx status $code"
-            exit 1
-          fi
           echo "Run succeeded."
