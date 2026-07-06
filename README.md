@@ -42,7 +42,7 @@ No database, no web UI — one headless job per trigger.
 - **Scheduler:** GitHub Actions (`.github/workflows/daily-alert.yml`)
 - **Runtime:** SnapDeploy container (`app.py` → Flask `/health` + `/run`)
 - **Secrets:** SnapDeploy env vars + matching GitHub repository secrets
-- **Live URL:** `https://goldpricealert.containers.snapdeploy.dev`
+- **Live URL:** `https://goldpricealert.containers.snapdeploy.app`
 
 ### Trigger the deployed app
 
@@ -51,9 +51,9 @@ No database, no web UI — one headless job per trigger.
 **curl (manual):**
 
 ```bash
-curl https://goldpricealert.containers.snapdeploy.dev/health
+curl https://goldpricealert.containers.snapdeploy.app/health
 curl -X POST -H "X-Cron-Secret: YOUR_SECRET" \
-  https://goldpricealert.containers.snapdeploy.dev/run
+  https://goldpricealert.containers.snapdeploy.app/run
 ```
 
 Full setup: **[deployment.md](deployment.md)**

@@ -16,14 +16,14 @@ Production hosting for the Gold Price Alert app. For local development, see [REA
 
 ```
 GitHub Actions (08:30 IST daily)
-    → POST https://goldpricealert.containers.snapdeploy.dev/run
+    → POST https://goldpricealert.containers.snapdeploy.app/run
        Header: X-Cron-Secret: <CRON_SECRET>
     → SnapDeploy wakes container (~1 min cold start)
     → App runs once: fetch → analyze → email + WhatsApp
     → Container sleeps again
 ```
 
-**Live app URL:** `https://goldpricealert.containers.snapdeploy.dev`
+**Live app URL:** `https://goldpricealert.containers.snapdeploy.app`
 
 SnapDeploy has **no built-in cron**. GitHub Actions is the scheduler; SnapDeploy is the runtime.
 
@@ -74,7 +74,7 @@ WhatsApp uses the **Twilio sandbox**, so a new number needs **two steps**:
 2. [SnapDeploy](https://snapdeploy.dev) → **New Container** → connect this repo (entry: `app.py`).
 3. Set env vars in SnapDeploy dashboard — see `.env.example` and `prd.md` Section 8.
 4. Add GitHub repository secrets (Settings → Secrets and variables → Actions → **Repository secrets**):
-   - `SNAPDEPLOY_APP_URL` — `https://goldpricealert.containers.snapdeploy.dev` (no trailing slash)
+   - `SNAPDEPLOY_APP_URL` — `https://goldpricealert.containers.snapdeploy.app` (no trailing slash)
    - `CRON_SECRET` — **same value** as SnapDeploy `CRON_SECRET`
 5. Enable workflow: `.github/workflows/daily-alert.yml` (runs daily **08:30 IST**).
 
@@ -115,13 +115,13 @@ Set the **same** value in SnapDeploy env vars and GitHub repository secret `CRON
 ```bash
 curl -sf -X POST \
   -H "X-Cron-Secret: YOUR_SECRET" \
-  https://goldpricealert.containers.snapdeploy.dev/run
+  https://goldpricealert.containers.snapdeploy.app/run
 ```
 
 **Health check** (no auth):
 
 ```bash
-curl https://goldpricealert.containers.snapdeploy.dev/health
+curl https://goldpricealert.containers.snapdeploy.app/health
 ```
 
 ---
@@ -164,7 +164,7 @@ First deploy can take **5–10 minutes**. If it stays stuck longer:
 2. Ensure the `Dockerfile` installs **`gunicorn`** and runs it (SnapDeploy runs Gunicorn, not Flask’s dev server).
 3. Confirm **`GET /health`** returns 200 once the URL is live:
    ```bash
-   curl https://goldpricealert.containers.snapdeploy.dev/health
+   curl https://goldpricealert.containers.snapdeploy.app/health
    ```
 4. In SnapDeploy container settings, set **`PORT=5000`** if auto-detection picked the wrong port.
 
