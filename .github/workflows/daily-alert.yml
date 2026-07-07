@@ -4,6 +4,8 @@ on:
   schedule:
     # 08:30 IST = 03:00 UTC
     - cron: "0 3 * * *"
+    # 08:35 IST = 03:05 UTC — backup in case GitHub skips/delays the first run
+    - cron: "5 3 * * *"
   workflow_dispatch:
 
 jobs:
