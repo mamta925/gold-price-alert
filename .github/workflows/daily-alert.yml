@@ -20,22 +20,41 @@ jobs:
             exit 1
           fi
           base="${SNAPDEPLOY_APP_URL%/}"
+          host=$(printf '%s' "$base" | sed -E 's#^https?://##; s#/.*##')
+          subdomain="${host%%.*}"
+          wake_url="https://snapdeploy.dev/api/public/wake/${subdomain}"
 
-          # SnapDeploy auto-sleeps the container and serves a 503 "Waking up your
-          # container..." page until it is ready. /health can briefly report 200 at
-          # the edge while POST /run still hits the wake page, so we retry the POST
-          # itself and treat the wake page as "still waking" rather than a failure.
-          echo "Warming container via GET $base/health ..."
-          for i in $(seq 1 20); do
+          # SnapDeploy auto-sleeps the container. A plain GET only returns the
+          # "waking up" HTML page — it does NOT start the container. The wake page's
+          # JS calls the platform wake API, so we must call it here to actually wake.
+          echo "Requesting wake: POST $wake_url"
+          curl -sS -X POST -H "Content-Type: application/json" --max-time 40 "$wake_url" || true
+          echo ""
+
+          echo "Waiting for container to become healthy ..."
+          awake=0
+          for i in $(seq 1 30); do
             hc=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 30 "$base/health" || echo 000)
             echo "  health attempt $i -> HTTP $hc"
-            [ "$hc" = "200" ] && break
-            sleep 10
+            if [ "$hc" = "200" ]; then
+              awake=1
+              echo "Container is awake."
+              break
+            fi
+            # Re-issue the wake every 5 attempts in case the first didn't take.
+            if [ $((i % 5)) -eq 0 ]; then
+              curl -sS -X POST -H "Content-Type: application/json" --max-time 40 "$wake_url" >/dev/null || true
+            fi
+            sleep 12
           done
+          if [ "$awake" -ne 1 ]; then
+            echo "Container did not wake within timeout."
+            exit 1
+          fi
 
           echo "Triggering POST $base/run ..."
           run_ok=0
-          for i in $(seq 1 20); do
+          for i in $(seq 1 10); do
             # -L follows http->https redirect; --post30x keeps the method a POST.
             code=$(curl -sL --post301 --post302 --post303 \
               -o /tmp/run_body.txt -w "%{http_code}" --max-time 180 \
@@ -50,7 +69,6 @@ jobs:
               run_ok=1
               break
             fi
-            # A real (non-wake-page) error from the app — stop and surface it.
             echo "--- response body ---"
             cat /tmp/run_body.txt || true
             echo ""
